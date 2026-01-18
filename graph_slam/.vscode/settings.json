@@ -1,0 +1,26 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/tomas/ros2_ws/install/path_planner/lib/python3.10/site-packages",
+        "/home/tomas/ros2_ws/install/lart_msgs/local/lib/python3.10/dist-packages",
+        "/home/tomas/ros2_ws/install/eufs_launcher/lib/python3.10/site-packages",
+        "/home/tomas/ros2_ws/install/eufs_tracks/lib/python3.10/site-packages",
+        "/home/tomas/ros2_ws/install/eufs_rqt/lib/python3.10/site-packages",
+        "/home/tomas/ros2_ws/install/eufs_racecar/lib/python3.10/site-packages",
+        "/home/tomas/ros2_ws/install/eufs_msgs/local/lib/python3.10/dist-packages",
+        "/home/tomas/ros2_ws/install/ekf_node/lib/python3.10/site-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/tomas/ros2_ws/install/path_planner/lib/python3.10/site-packages",
+        "/home/tomas/ros2_ws/install/lart_msgs/local/lib/python3.10/dist-packages",
+        "/home/tomas/ros2_ws/install/eufs_launcher/lib/python3.10/site-packages",
+        "/home/tomas/ros2_ws/install/eufs_tracks/lib/python3.10/site-packages",
+        "/home/tomas/ros2_ws/install/eufs_rqt/lib/python3.10/site-packages",
+        "/home/tomas/ros2_ws/install/eufs_racecar/lib/python3.10/site-packages",
+        "/home/tomas/ros2_ws/install/eufs_msgs/local/lib/python3.10/dist-packages",
+        "/home/tomas/ros2_ws/install/ekf_node/lib/python3.10/site-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ]
+}
