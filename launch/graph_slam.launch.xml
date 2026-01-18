@@ -1,0 +1,8 @@
+<launch>
+  <node
+    pkg="graph_slam"
+    exec="graph_slam_node"
+    name="graph_slam_node"
+    output="screen">
+  </node>
+</launch>

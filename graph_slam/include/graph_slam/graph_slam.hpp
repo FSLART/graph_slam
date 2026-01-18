@@ -2,7 +2,7 @@
 #define GRAPH_SLAM_H_
 
 #include "rclcpp/rclcpp.hpp"
-#include "associationSolver.hpp"
+#include "graph_slam/associationSolver.hpp"
 
 #define ASSICIATION_MODE 1
 #define CONES_TOPIC "/mapping/cones"

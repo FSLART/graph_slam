@@ -7,9 +7,36 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(lart_msgs REQUIRED)
+
+add_executable(graph_slam_node
+  src/graph_slam.cpp
+  src/associationSolver.cpp
+)
+
+target_include_directories(graph_slam_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(graph_slam_node
+  rclcpp
+  lart_msgs
+)
+
+install(TARGETS
+  graph_slam_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY include/
+  DESTINATION include
+)
+
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

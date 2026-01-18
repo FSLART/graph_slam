@@ -23,7 +23,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 {
     RCLCPP_INFO(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
 
-    association_solver_->associate(msg->cones);
+    association_solver_->associate(*msg);
 }
 
 int main(int argc, char *argv[])
