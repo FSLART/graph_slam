@@ -3,7 +3,6 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "associationSolver.hpp"
-#include "lart_msgs/msg/cone_array.hpp"
 
 #define ASSICIATION_MODE 1
 #define CONES_TOPIC "/mapping/cones"
