@@ -12,8 +12,9 @@ public:
 
     void associate(const lart_msgs::msg::ConeArray &observations);
 
-private:
     class AssociationBackend;
+
+private:
     std::unique_ptr<AssociationBackend> backend_;
 };
 
