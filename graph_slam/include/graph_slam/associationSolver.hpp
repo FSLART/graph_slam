@@ -2,7 +2,12 @@
 #define ASSOCIATION_SOLVER_H_
 
 #include <memory>
+#include <vector>
+
 #include "lart_msgs/msg/cone_array.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
+
+#define ASSOCIATION_EUCLIDIAN_DISTANCE_THRESHOLD_SQUARED 1.0  // meters
 
 class AssociationSolver
 {
@@ -10,7 +15,9 @@ public:
     AssociationSolver(int mode);
     ~AssociationSolver();
 
-    void associate(const lart_msgs::msg::ConeArray &observations);
+    std::vector<int> associate(const lart_msgs::msg::ConeArray &observations,
+                               const lart_msgs::msg::ConeArray &map_cones,
+                               const geometry_msgs::msg::PoseStamped &pose);
 
     class AssociationBackend;
 

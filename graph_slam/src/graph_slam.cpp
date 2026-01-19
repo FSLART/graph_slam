@@ -23,7 +23,13 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 {
     RCLCPP_INFO(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
 
-    association_solver_->associate(*msg);
+    // TODO : replace placeholders with real values
+    geometry_msgs::msg::PoseStamped current_pose_ = geometry_msgs::msg::PoseStamped(); 
+    lart_msgs::msg::ConeArray map_cones_ = lart_msgs::msg::ConeArray();
+
+    const auto matches = association_solver_->associate(*msg, map_cones_, current_pose_);
+
+    (void)matches; // To avoid unused variable warning for now
 }
 
 int main(int argc, char *argv[])

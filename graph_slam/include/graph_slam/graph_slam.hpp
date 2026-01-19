@@ -4,6 +4,9 @@
 #include "rclcpp/rclcpp.hpp"
 #include "graph_slam/associationSolver.hpp"
 
+#include "lart_msgs/msg/cone_array.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
+
 #define ASSOCIATION_MODE 0
 #define CONES_TOPIC "/mapping/cones"
 
