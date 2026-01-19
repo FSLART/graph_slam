@@ -23,7 +23,7 @@ Data association is handled by [`AssociationSolver`](graph_slam/include/graph_sl
 
 The active mode is selected in [`GraphSLAM`](graph_slam/include/graph_slam/graph_slam.hpp) via
 
-- `ASSICIATION_MODE` (currently set to `1`)
+- `ASSICIATION_MODE` (currently set to `0`)
 
 You can change the default association strategy by editing this macro.
 
@@ -40,6 +40,7 @@ Ensure the dependencies listed in [graph_slam/package.xml](graph_slam/package.xm
 
 - `rclcpp`
 - `lart_msgs`
+- `geometry_msgs`
 
 ## Running the node
 
