@@ -92,6 +92,7 @@ public:
                 }
             }
 
+            //TODO : Use variable threshold based on observation uncertainty
             if (best_index != -1 && best_dist <= ASSOCIATION_EUCLIDIAN_DISTANCE_THRESHOLD_SQUARED)
             {
                 // Observation is considered to correspond to an existing map cone
