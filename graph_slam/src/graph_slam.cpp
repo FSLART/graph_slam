@@ -6,7 +6,7 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 {
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been started.");
 
-    association_solver_ = new AssociationSolver(ASSICIATION_MODE);
+    association_solver_ = new AssociationSolver(ASSOCIATION_MODE);
 
     observations_subscriber_ = this->create_subscription<lart_msgs::msg::ConeArray>(
         CONES_TOPIC, 10,

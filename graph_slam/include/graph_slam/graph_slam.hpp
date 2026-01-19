@@ -4,7 +4,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "graph_slam/associationSolver.hpp"
 
-#define ASSICIATION_MODE 1
+#define ASSOCIATION_MODE 0
 #define CONES_TOPIC "/mapping/cones"
 
 class GraphSLAM : public rclcpp::Node
