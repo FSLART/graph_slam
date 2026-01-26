@@ -83,16 +83,17 @@ public:
                     continue;
                 }
                 const auto &map_cone = map_cones.cones[j];
-                const double d = euclideanDistance2D(obs_global, map_cone.position);
+                const double d_squared = euclideanDistance2D(obs_global, map_cone.position);
 
-                if (d < best_dist)
+                if (d_squared < best_dist)
                 {
-                    best_dist = d;
+                    best_dist = d_squared;
                     best_index = static_cast<int>(j);
                 }
             }
 
             //TODO : Use variable threshold based on observation uncertainty
+            //TODO : Threshold lower in function of the number of cones (they are closer together)
             if (best_index != -1 && best_dist <= ASSOCIATION_EUCLIDIAN_DISTANCE_THRESHOLD_SQUARED)
             {
                 // Observation is considered to correspond to an existing map cone
