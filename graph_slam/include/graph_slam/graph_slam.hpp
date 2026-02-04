@@ -5,7 +5,11 @@
 #include "graph_slam/associationSolver.hpp"
 
 #include "lart_msgs/msg/cone_array.hpp"
-#include "geometry_msgs/msg/pose_stamped.hpp"
+#include <geometry_msgs/msg/pose_stamped.hpp>
+
+#include <g2o/core/sparse_optimizer.h>
+#include <g2o/core/optimization_algorithm_gauss_newton.h>
+#include <g2o/core/block_solver.h>
 
 #define ASSOCIATION_MODE 0
 #define CONES_TOPIC "/mapping/cones"

@@ -1,6 +1,7 @@
 #include "graph_slam/graph_slam.hpp"
 
 using std::placeholders::_1;
+using namespace g2o;
 
 GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 {
@@ -11,6 +12,8 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     observations_subscriber_ = this->create_subscription<lart_msgs::msg::ConeArray>(
         CONES_TOPIC, 10,
         std::bind(&GraphSLAM::observations_callback, this, _1));
+
+    
 }
 
 GraphSLAM::~GraphSLAM()

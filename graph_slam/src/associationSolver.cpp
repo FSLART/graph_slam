@@ -93,7 +93,7 @@ public:
             }
 
             //TODO : Use variable threshold based on observation uncertainty
-            //TODO : Threshold lower in function of the number of cones (they are closer together)
+            //TODO : Threshold lower in function of the number of cones (they are probably closer)  
             if (best_index != -1 && best_dist <= ASSOCIATION_EUCLIDIAN_DISTANCE_THRESHOLD_SQUARED)
             {
                 // Observation is considered to correspond to an existing map cone

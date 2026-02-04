@@ -10,6 +10,8 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(lart_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(g2o REQUIRED)
+find_package(fmt REQUIRED)
 
 add_executable(graph_slam_node
   src/graph_slam.cpp
@@ -25,6 +27,11 @@ ament_target_dependencies(graph_slam_node
   rclcpp
   lart_msgs
   geometry_msgs
+  g2o
+)
+
+target_link_libraries(graph_slam_node
+  fmt::fmt
 )
 
 install(TARGETS
