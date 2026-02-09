@@ -13,7 +13,13 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
         CONES_TOPIC, 10,
         std::bind(&GraphSLAM::observations_callback, this, _1));
 
+    auto linearSolver = std::make_unique<SlamLinearSolver>();
+
+    OptimizationAlgorithmGaussNewton* solver =
+      new OptimizationAlgorithmGaussNewton(
+          std::make_unique<SlamBlockSolver>(std::move(linearSolver)));
     
+    optimizer_.setAlgorithm(solver);
 }
 
 GraphSLAM::~GraphSLAM()
@@ -32,7 +38,19 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
     const auto matches = association_solver_->associate(*msg, map_cones_, current_pose_);
 
-    (void)matches; // To avoid unused variable warning for now
+    for (std::size_t i = 0; i < msg->cones.size(); ++i){
+        if (matches[i] != -1){
+            graph_slam::VertexLandmark2D* landmark = new graph_slam::VertexLandmark2D();
+            landmark->setId(landmark_id_counter_++);
+            landmark->setEstimate(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
+            landmark->setColor(msg->cones[i].class_type.data);
+            this->optimizer_.addVertex(landmark);
+            RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
+        } else {
+            RCLCPP_DEBUG(this->get_logger(), "Observation %zu is a new cone.", i);
+        }
+    }
+
 }
 
 int main(int argc, char *argv[])
