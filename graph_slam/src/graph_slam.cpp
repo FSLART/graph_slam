@@ -47,15 +47,24 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     geometry_msgs::msg::PoseStamped current_pose_ = geometry_msgs::msg::PoseStamped(); 
     lart_msgs::msg::ConeArray map_cones_ = lart_msgs::msg::ConeArray();
 
-    const auto matches = association_solver_->associate(*msg, map_cones_, current_pose_);
+    // const auto matches = association_solver_->associate(*msg, map_cones_, current_pose_);
+    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> association_result = association_solver_->associate(*msg, map_cones_, current_pose_);
+    
+    const auto matches = association_result.first;
+    const auto obs_global = association_result.second;
+
+    optimizer_.vertices();
 
     for (std::size_t i = 0; i < msg->cones.size(); ++i){
         if (matches[i] != -1){
             VertexLandmark2D* landmark = new VertexLandmark2D();
             landmark->setId(landmark_id_counter_++);
-            landmark->setEstimate(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
+            landmark->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
             landmark->setColor(msg->cones[i].class_type.data);
             this->optimizer_.addVertex(landmark);
+
+            EdgeSE2* edge = new EdgeSE2();
+
             RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
         } else {
             RCLCPP_DEBUG(this->get_logger(), "Observation %zu is a new cone.", i);

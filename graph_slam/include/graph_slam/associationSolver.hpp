@@ -15,7 +15,7 @@ public:
     AssociationSolver(int mode);
     ~AssociationSolver();
 
-    std::vector<int> associate(const lart_msgs::msg::ConeArray &observations,
+    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
                                const lart_msgs::msg::ConeArray &map_cones,
                                const geometry_msgs::msg::PoseStamped &pose);
 

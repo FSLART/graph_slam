@@ -16,6 +16,34 @@ namespace
         const double dy = a.y - b.y;
         return dx * dx + dy * dy;
     }
+
+    inline lart_msgs::msg::ConeArray obsToGlobal(const lart_msgs::msg::ConeArray &cone_array, const geometry_msgs::msg::PoseStamped &pose)
+    {
+        lart_msgs::msg::ConeArray positions;
+        const double yaw = pose.pose.orientation.w;
+        const double cy = std::cos(yaw);
+        const double sy = std::sin(yaw);
+        const double car_x = pose.pose.position.x;
+        const double car_y = pose.pose.position.y;
+
+        for (std::size_t i = 0; i < cone_array.cones.size(); ++i){
+            const auto &obs_cone_local = cone_array.cones[i];
+
+            // Transform to global coordinates (2D)
+            lart_msgs::msg::Cone obs_global;
+            const double x_l = obs_cone_local.position.x;
+            const double y_l = obs_cone_local.position.y;
+
+            obs_global.position.x = car_x + cy * x_l - sy * y_l;
+            obs_global.position.y = car_y + sy * x_l + cy * y_l;
+            obs_global.position.z = 0.0;
+            obs_global.class_type = obs_cone_local.class_type;
+
+            positions.cones.push_back(obs_global);
+        }
+
+        return positions;
+    }
 } // namespace
 
 // ================== Backend interface =======================================
@@ -26,7 +54,7 @@ public:
     virtual ~AssociationBackend() = default;
     // Returns a vector aligned with observations.cones:
     //  - element i is the index of the matched map cone, or -1 if no match
-    virtual std::vector<int> associate(const lart_msgs::msg::ConeArray &observations,
+    virtual std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
                                        const lart_msgs::msg::ConeArray &map_cones,
                                        const geometry_msgs::msg::PoseStamped &pose) = 0;
 };
@@ -36,10 +64,12 @@ public:
 class NearestNeighborBackend : public AssociationSolver::AssociationBackend
 {
 public:
-    std::vector<int> associate(const lart_msgs::msg::ConeArray &observations,
+    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
                                const lart_msgs::msg::ConeArray &map_cones,
                                const geometry_msgs::msg::PoseStamped &pose) override
     {
+
+        lart_msgs::msg::ConeArray obs_global = obsToGlobal(observations, pose);
         // If there is no map yet or no observations, everything is "new"
         if (map_cones.cones.empty())
         {
@@ -47,30 +77,18 @@ public:
                          "Map is empty, all observations are unmatched.");
             
             // All observations are unmatched -> filled with -1
-            return std::vector<int>(observations.cones.size(), -1);
+            return {std::vector<int>(observations.cones.size(), -1), obs_global};
         }
-
-        // Transform observations from local vehicle frame into global/map frame
-        const auto &pose_msg = pose.pose;
-        const double yaw = pose.pose.orientation.w;
-        const double cy = std::cos(yaw);
-        const double sy = std::sin(yaw);
 
         std::vector<int> matches(observations.cones.size(), -1);
 
         // For each observed cone (in local frame), find nearest cone in map (global)
-        for (std::size_t i = 0; i < observations.cones.size(); ++i)
+        for (std::size_t i = 0; i < obs_global.cones.size(); ++i)
         {
             const auto &obs_cone_local = observations.cones[i];
 
             // Transform to global coordinates (2D)
-            geometry_msgs::msg::Point obs_global;
-            const double x_l = obs_cone_local.position.x;
-            const double y_l = obs_cone_local.position.y;
-
-            obs_global.x = pose_msg.position.x + cy * x_l - sy * y_l;
-            obs_global.y = pose_msg.position.y + sy * x_l + cy * y_l;
-            obs_global.z = 0.0;
+            geometry_msgs::msg::Point global_cone = obs_global.cones[i].position;
 
             int best_index = -1;
             double best_dist = std::numeric_limits<double>::max();
@@ -83,7 +101,7 @@ public:
                     continue;
                 }
                 const auto &map_cone = map_cones.cones[j];
-                const double d_squared = euclideanDistance2D(obs_global, map_cone.position);
+                const double d_squared = euclideanDistance2D(global_cone, map_cone.position);
 
                 if (d_squared < best_dist)
                 {
@@ -112,7 +130,7 @@ public:
         }
 
         // Return full match array, aligned with observations
-        return matches;
+        return {matches, obs_global};
     }
 };
 
@@ -121,18 +139,18 @@ public:
 class MahalanobisBackend : public AssociationSolver::AssociationBackend
 {
 public:
-    std::vector<int> associate(const lart_msgs::msg::ConeArray &observations,
+    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
                                const lart_msgs::msg::ConeArray &map_cones,
                                const geometry_msgs::msg::PoseStamped &pose) override
     {
+
+        lart_msgs::msg::ConeArray obs_global = obsToGlobal(observations, pose);
         // TODO: implement Mahalanobis distance-based association
         // d^2 = (z - h(x))^T S^{-1} (z - h(x))
-        (void)observations;
         (void)map_cones;
-        (void)pose;
 
         // For now, treat all observations as unmatched
-        return std::vector<int>(observations.cones.size(), -1);
+        return {std::vector<int>(observations.cones.size(), -1), obs_global};
     }
 };
 
@@ -155,12 +173,12 @@ AssociationSolver::AssociationSolver(int mode)
 
 AssociationSolver::~AssociationSolver() = default;
 
-std::vector<int> AssociationSolver::associate(const lart_msgs::msg::ConeArray &observations,
+std::pair<std::vector<int>, lart_msgs::msg::ConeArray> AssociationSolver::associate(const lart_msgs::msg::ConeArray &observations,
                                               const lart_msgs::msg::ConeArray &map_cones,
                                               const geometry_msgs::msg::PoseStamped &pose)
 {
     if (backend_)
         return backend_->associate(observations, map_cones, pose);
 
-    return {};
+    return std::pair<std::vector<int>, lart_msgs::msg::ConeArray>{};
 }
