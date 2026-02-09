@@ -16,6 +16,7 @@ find_package(fmt REQUIRED)
 add_executable(graph_slam_node
   src/graph_slam.cpp
   src/associationSolver.cpp
+  src/types_graph_slam.cpp
 )
 
 target_include_directories(graph_slam_node PUBLIC
@@ -27,11 +28,14 @@ ament_target_dependencies(graph_slam_node
   rclcpp
   lart_msgs
   geometry_msgs
-  g2o
 )
 
 target_link_libraries(graph_slam_node
   fmt::fmt
+  g2o_core
+  g2o_types_slam2d
+  g2o_solver_eigen
+  g2o_stuff
 )
 
 install(TARGETS

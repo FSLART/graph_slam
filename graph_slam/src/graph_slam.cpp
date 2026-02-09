@@ -40,7 +40,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
     for (std::size_t i = 0; i < msg->cones.size(); ++i){
         if (matches[i] != -1){
-            graph_slam::VertexLandmark2D* landmark = new graph_slam::VertexLandmark2D();
+            VertexLandmark2D* landmark = new VertexLandmark2D();
             landmark->setId(landmark_id_counter_++);
             landmark->setEstimate(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
             landmark->setColor(msg->cones[i].class_type.data);
