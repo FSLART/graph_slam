@@ -64,6 +64,20 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
 }
 
+void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
+{
+    RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message.");
+    // TODO: Implement dynamics callback
+    (void)msg; // To avoid unused parameter warning
+}
+
+void GraphSLAM::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg)
+{
+    RCLCPP_DEBUG(this->get_logger(), "Received IMU angular velocity message.");
+    // TODO: Implement IMU callback
+    (void)msg; // To avoid unused parameter warning
+}
+
 int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
