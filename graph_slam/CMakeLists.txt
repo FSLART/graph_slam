@@ -24,6 +24,11 @@ target_include_directories(graph_slam_node PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
+include_directories(
+  include
+  ${CMAKE_SOURCE_DIR}/../../lart_common
+)
+
 ament_target_dependencies(graph_slam_node
   rclcpp
   lart_msgs

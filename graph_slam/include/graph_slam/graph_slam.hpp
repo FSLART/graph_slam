@@ -7,6 +7,8 @@
 #include "geometry_msgs/msg/vector3_stamped.hpp"
 #include "lart_msgs/msg/cone_array.hpp"
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include "lart_common.h"
+#include <chrono>
 
 #include <g2o/core/sparse_optimizer.h>
 #include <g2o/core/optimization_algorithm_gauss_newton.h>
@@ -28,6 +30,7 @@ public:
     void observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg);
     void dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg);
     void imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
+    void compute_predicted_pose(float velocity, float omega_z);
 private:
     rclcpp::Subscription<lart_msgs::msg::ConeArray>::SharedPtr observations_subscriber_;
     rclcpp::Subscription<lart_msgs::msg::Dynamics>::SharedPtr dynamics_subscriber_;
@@ -37,6 +40,9 @@ private:
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
     using SlamLinearSolver = g2o::LinearSolverEigen<SlamBlockSolver::PoseMatrixType>;
     int landmark_id_counter_ = -1;
+    float angular_velocity_ = 0.0;
+    std::chrono::steady_clock::time_point last_predict_time_{};
+    Eigen::Vector3d current_pose_{0.0, 0.0, 0.0}; // x, y, theta
 
 protected:
     AssociationSolver *association_solver_;
