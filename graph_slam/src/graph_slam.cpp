@@ -9,10 +9,21 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 
     association_solver_ = new AssociationSolver(ASSOCIATION_MODE);
 
+    // Subscribe to the cone observations topic
     observations_subscriber_ = this->create_subscription<lart_msgs::msg::ConeArray>(
         CONES_TOPIC, 10,
         std::bind(&GraphSLAM::observations_callback, this, _1));
 
+    // Subscribe to the dynamics topic
+    dynamics_subscriber_ = this->create_subscription<lart_msgs::msg::Dynamics>(
+        DYNAMICS_TOPIC, 10,
+        std::bind(&GraphSLAM::dynamics_callback, this, _1));
+
+    //Subscribe to angular velocity topic 
+    imu_subscriber_ = this->create_subscription<geometry_msgs::msg::Vector3Stamped>(
+        IMU_TOPIC, 10,
+        std::bind(&GraphSLAM::imu_callback, this, _1));
+    
     auto linearSolver = std::make_unique<SlamLinearSolver>();
 
     OptimizationAlgorithmGaussNewton* solver =
