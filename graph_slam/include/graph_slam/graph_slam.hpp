@@ -37,7 +37,8 @@ private:
     g2o::SparseOptimizer optimizer_;
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
     using SlamLinearSolver = g2o::LinearSolverEigen<SlamBlockSolver::PoseMatrixType>;
-    int landmark_id_counter_ = -1;
+    long landmark_id_counter_ = -1;
+    long pose_id_counter_ = 5000;
 
 protected:
     AssociationSolver *association_solver_;

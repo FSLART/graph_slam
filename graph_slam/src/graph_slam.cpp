@@ -58,12 +58,17 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     for (std::size_t i = 0; i < msg->cones.size(); ++i){
         if (matches[i] != -1){
             VertexLandmark2D* landmark = new VertexLandmark2D();
-            landmark->setId(landmark_id_counter_++);
+            landmark->setId(++landmark_id_counter_);
             landmark->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
             landmark->setColor(msg->cones[i].class_type.data);
             this->optimizer_.addVertex(landmark);
 
             EdgeSE2* edge = new EdgeSE2();
+            edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(pose_id_counter_)));
+            edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id_counter_)));
+            edge->setMeasurement(g2o::SE2(msg->cones[i].position.x, msg->cones[i].position.y, 0.0)); // Assuming zero orientation for simplicity
+            edge->setInformation(Eigen::Matrix3d::Identity()); // Placeholder information matrix
+            this->optimizer_.addEdge(edge); 
 
             RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
         } else {
