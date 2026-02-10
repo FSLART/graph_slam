@@ -1,11 +1,5 @@
 #include "graph_slam/associationSolver.hpp"
 
-#include <stdexcept>
-#include <cmath>
-#include <limits>
-
-#include "rclcpp/rclcpp.hpp"
-
 namespace
 {
     // Simple 2D Euclidean distance between two geometry_msgs points
@@ -17,14 +11,14 @@ namespace
         return dx * dx + dy * dy;
     }
 
-    inline lart_msgs::msg::ConeArray obsToGlobal(const lart_msgs::msg::ConeArray &cone_array, const geometry_msgs::msg::PoseStamped &pose)
+    inline lart_msgs::msg::ConeArray obsToGlobal(const lart_msgs::msg::ConeArray &cone_array, const Eigen::Vector3d &pose)
     {
         lart_msgs::msg::ConeArray positions;
-        const double yaw = pose.pose.orientation.w;
+        const double yaw = pose[2];
         const double cy = std::cos(yaw);
         const double sy = std::sin(yaw);
-        const double car_x = pose.pose.position.x;
-        const double car_y = pose.pose.position.y;
+        const double car_x = pose[0];
+        const double car_y = pose[1];
 
         for (std::size_t i = 0; i < cone_array.cones.size(); ++i){
             const auto &obs_cone_local = cone_array.cones[i];
@@ -56,7 +50,7 @@ public:
     //  - element i is the index of the matched map cone, or -1 if no match
     virtual std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
                                        const lart_msgs::msg::ConeArray &map_cones,
-                                       const geometry_msgs::msg::PoseStamped &pose) = 0;
+                                       const Eigen::Vector3d &pose) = 0;
 };
 
 // ================== Nearest Neighbor backend =================================
@@ -66,7 +60,7 @@ class NearestNeighborBackend : public AssociationSolver::AssociationBackend
 public:
     std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
                                const lart_msgs::msg::ConeArray &map_cones,
-                               const geometry_msgs::msg::PoseStamped &pose) override
+                               const Eigen::Vector3d &pose) override
     {
 
         lart_msgs::msg::ConeArray obs_global = obsToGlobal(observations, pose);
@@ -139,7 +133,7 @@ class MahalanobisBackend : public AssociationSolver::AssociationBackend
 public:
     std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
                                const lart_msgs::msg::ConeArray &map_cones,
-                               const geometry_msgs::msg::PoseStamped &pose) override
+                               const Eigen::Vector3d &pose) override
     {
 
         lart_msgs::msg::ConeArray obs_global = obsToGlobal(observations, pose);
@@ -173,7 +167,7 @@ AssociationSolver::~AssociationSolver() = default;
 
 std::pair<std::vector<int>, lart_msgs::msg::ConeArray> AssociationSolver::associate(const lart_msgs::msg::ConeArray &observations,
                                               const lart_msgs::msg::ConeArray &map_cones,
-                                              const geometry_msgs::msg::PoseStamped &pose)
+                                              const Eigen::Vector3d &pose)
 {
     if (backend_)
         return backend_->associate(observations, map_cones, pose);

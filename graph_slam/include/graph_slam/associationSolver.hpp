@@ -3,6 +3,12 @@
 
 #include <memory>
 #include <vector>
+#include <Eigen/Dense>
+#include <stdexcept>
+#include <cmath>
+#include <limits>
+
+#include <rclcpp/rclcpp.hpp>
 
 #include "lart_msgs/msg/cone_array.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
@@ -17,7 +23,7 @@ public:
 
     std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
                                const lart_msgs::msg::ConeArray &map_cones,
-                               const geometry_msgs::msg::PoseStamped &pose);
+                               const Eigen::Vector3d &pose);
 
     class AssociationBackend;
 

@@ -44,11 +44,12 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     RCLCPP_INFO(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
 
     // TODO : replace placeholders with real values
-    geometry_msgs::msg::PoseStamped current_pose_ = geometry_msgs::msg::PoseStamped(); 
+    long current_pose_id = pose_id_counter_;
+    auto robot_pose_ =this->current_pose_; 
     lart_msgs::msg::ConeArray map_cones_ = lart_msgs::msg::ConeArray();
 
     // const auto matches = association_solver_->associate(*msg, map_cones_, current_pose_);
-    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> association_result = association_solver_->associate(*msg, map_cones_, current_pose_);
+    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> association_result = association_solver_->associate(*msg, map_cones_, robot_pose_);
     
     const auto matches = association_result.first;
     const auto obs_global = association_result.second;
@@ -63,11 +64,11 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             landmark->setColor(msg->cones[i].class_type.data);
             this->optimizer_.addVertex(landmark);
 
-            EdgeSE2* edge = new EdgeSE2();
-            edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(pose_id_counter_)));
+            EdgeSE2PointXY* edge = new EdgeSE2PointXY();
+            edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
             edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id_counter_)));
-            edge->setMeasurement(g2o::SE2(msg->cones[i].position.x, msg->cones[i].position.y, 0.0)); // Assuming zero orientation for simplicity
-            edge->setInformation(Eigen::Matrix3d::Identity()); // Placeholder information matrix
+            edge->setMeasurement(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
+            edge->setInformation(Eigen::Matrix2d::Identity()); // Placeholder information matrix
             this->optimizer_.addEdge(edge); 
 
             RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
