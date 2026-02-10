@@ -85,8 +85,6 @@ public:
         // For each observed cone (in local frame), find nearest cone in map (global)
         for (std::size_t i = 0; i < obs_global.cones.size(); ++i)
         {
-            const auto &obs_cone_local = observations.cones[i];
-
             // Transform to global coordinates (2D)
             geometry_msgs::msg::Point global_cone = obs_global.cones[i].position;
 
@@ -95,7 +93,7 @@ public:
 
             for (std::size_t j = 0; j < map_cones.cones.size(); ++j)
             {
-                if(observations.cones[i].class_type.data != map_cones.cones[j].class_type.data)
+                if(obs_global.cones[i].class_type.data != map_cones.cones[j].class_type.data)
                 {
                     // Skip cones of different color
                     continue;
@@ -109,7 +107,7 @@ public:
                     best_index = static_cast<int>(j);
                 }
             }
-
+            
             //TODO : Use variable threshold based on observation uncertainty
             //TODO : Threshold lower in function of the number of cones (they are probably closer)  
             if (best_index != -1 && best_dist <= ASSOCIATION_EUCLIDIAN_DISTANCE_THRESHOLD_SQUARED)
