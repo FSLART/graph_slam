@@ -80,16 +80,49 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
 {
-    RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message.");
-    // TODO: Implement dynamics callback
-    (void)msg; // To avoid unused parameter warning
+    float current_rpm = (float)msg->rpm;
+    float ms_speed = TIRE_PERIMETER_M * (current_rpm / TRANSMISSION_RATIO / 60.0);
+    RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
+
 }
 
 void GraphSLAM::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg)
 {
-    RCLCPP_DEBUG(this->get_logger(), "Received IMU angular velocity message.");
-    // TODO: Implement IMU callback
-    (void)msg; // To avoid unused parameter warning
+    this->angular_velocity_ = msg->vector.z;
+    RCLCPP_DEBUG(this->get_logger(), "Received IMU angular velocity message: %f", this->angular_velocity_);
+}
+
+void GraphSLAM::compute_predicted_pose(float velocity, float omega_z)
+{
+    auto now = std::chrono::steady_clock::now();
+    if (last_predict_time_.time_since_epoch().count() == 0) {
+        last_predict_time_ = now;
+        return;
+    }
+
+    double dt = std::chrono::duration<double>(now - last_predict_time_).count();
+    last_predict_time_ = now;
+
+    double v = static_cast<double>(velocity);
+    double w = static_cast<double>(omega_z);
+    double theta = current_pose_[2];
+
+    double dx = 0.0;
+    double dy = 0.0;
+    if (std::abs(w) > 0.01) {
+        dx = -(v / w) * std::sin(theta) + (v / w) * std::sin(theta + w * dt);
+        dy =  (v / w) * std::cos(theta) - (v / w) * std::cos(theta + w * dt);
+    } else {
+        dx = v * std::cos(theta) * dt;
+        dy = v * std::sin(theta) * dt;
+    }
+
+    current_pose_[0] += dx;
+    current_pose_[1] += dy;
+    current_pose_[2] += w * dt;
+
+    // Normalize angle to [-pi, pi]
+    current_pose_[2] = std::atan2(std::sin(current_pose_[2]), std::cos(current_pose_[2]));
 }
 
 int main(int argc, char *argv[])
