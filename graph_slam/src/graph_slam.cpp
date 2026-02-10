@@ -45,9 +45,24 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     RCLCPP_INFO(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
 
     // TODO : replace placeholders with real values
-    long current_pose_id = pose_id_counter_;
-    auto robot_pose_ =this->current_pose_; 
+    const long current_pose_id = pose_id_counter_;
+    const auto robot_pose_ =this->current_pose_; 
     lart_msgs::msg::ConeArray map_cones_ = lart_msgs::msg::ConeArray();
+    const auto &verts = optimizer_.vertices();
+    for (const auto &kv : verts) {
+        auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
+        if (!v_landmark) {
+            continue; // skip non-landmark vertices
+        }
+
+        const Eigen::Vector2d &est = v_landmark->estimate();
+        lart_msgs::msg::Cone cone;
+        cone.position.x = est[0];
+        cone.position.y = est[1];
+        cone.position.z = 0.0;
+        cone.class_type.data = v_landmark->color();
+        map_cones_.cones.push_back(cone);
+    }
     
     pair<vector<int>, lart_msgs::msg::ConeArray> association_result = association_solver_->associate(*msg, map_cones_, robot_pose_);
     
