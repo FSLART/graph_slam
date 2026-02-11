@@ -92,11 +92,9 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
         double x = msg->cones[i].position.x;
         double y = msg->cones[i].position.y;
-        double d_sq = x*x + y*y;
-        double d = std::sqrt(d_sq);
 
-        double sigma_x = this->k_depth * d_sq + 0.1; // 0.1m base longitudinal uncertainty
-        double sigma_y = this->k_lateral* d + 0.05; // 0.05m base lateral uncertainty
+        double sigma_x = k_depth * std::pow(x, depth_weight) + base_depth_uncertainty_;
+        double sigma_y = k_lateral * x + base_lateral_uncertainty_;
 
         information(0, 0) = 1.0 / (sigma_x * sigma_x); // Inverse of sigma_x^2
         information(1, 1) = 1.0 / (sigma_y * sigma_y); // Inverse of sigma_y^2

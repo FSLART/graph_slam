@@ -47,8 +47,12 @@ private:
     float angular_velocity_ = 0.0;
     std::chrono::steady_clock::time_point last_predict_time_{};
     Eigen::Vector3d current_pose_{0.0, 0.0, 0.0}; // x, y, theta
-    const double k_depth = 0.015;  //longitudinal uncertainty
-    const double k_lateral = 0.03; //lateral uncertainty
+
+    const double base_depth_uncertainty_ = 0.1; // Base longitudinal uncertainty in meters
+    const double base_lateral_uncertainty_ = 0.05; // Base lateral
+    const double k_depth = 0.0012;  //longitudinal uncertainty
+    const double k_lateral = 0.04; //lateral uncertainty
+    const double depth_weight = 2.9; //exponential weight for depth uncertainty
 
 protected:
     AssociationSolver *association_solver_;
