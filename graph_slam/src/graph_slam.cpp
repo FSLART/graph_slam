@@ -36,6 +36,7 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 
 GraphSLAM::~GraphSLAM()
 {
+    this->optimizer_.save("final_graph.g2o");
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
 }
@@ -87,13 +88,37 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             RCLCPP_DEBUG(this->get_logger(), "Observation %zu is a new cone.", i);
         }
 
+        Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
+
+        double x = msg->cones[i].position.x;
+        double y = msg->cones[i].position.y;
+        double d_sq = x*x + y*y;
+        double d = std::sqrt(d_sq);
+
+        double sigma_x = this->k_depth * d_sq + 0.1; // 0.1m base longitudinal uncertainty
+        double sigma_y = this->k_lateral* d + 0.05; // 0.05m base lateral uncertainty
+
+        information(0, 0) = 1.0 / (sigma_x * sigma_x); // Inverse of sigma_x^2
+        information(1, 1) = 1.0 / (sigma_y * sigma_y); // Inverse of sigma_y^2
+
+
         EdgeSE2PointXY* edge = new EdgeSE2PointXY();
         edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
         edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id)));
         edge->setMeasurement(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
-        edge->setInformation(Eigen::Matrix2d::Identity()); // Placeholder information matrix
+        edge->setInformation(information); // Use the computed information matrix
         this->optimizer_.addEdge(edge);
     }
+
+    // //print all landmarks in the graph
+    // RCLCPP_INFO(this->get_logger(), "Current landmarks in the graph:");
+    // for (const auto &kv : verts) {
+    //     auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
+    //     if (v_landmark) {
+    //         const Eigen::Vector2d &est = v_landmark->estimate();
+    //         RCLCPP_INFO(this->get_logger(), "Landmark ID: %d, Position: (%.2f, %.2f), Color: %d", v_landmark->id(), est[0], est[1], v_landmark->color());
+    //     }
+    // }
 
 }
 

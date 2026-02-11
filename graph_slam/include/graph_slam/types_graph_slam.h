@@ -1,6 +1,8 @@
 #ifndef TYPES_GRAPH_SLAM_H
 #define TYPES_GRAPH_SLAM_H
 
+#include <iosfwd>
+
 #include <g2o/types/slam2d/vertex_point_xy.h>
 #include "graph_slam/g2o_graph_slam_api.h"
 
@@ -13,6 +15,9 @@ class G2O_GRAPH_SLAM_API VertexLandmark2D : public VertexPointXY {
 
         int color() const { return color_; }
         void setColor(int color) { color_ = color; }
+
+        virtual bool read(std::istream& is);
+        virtual bool write(std::ostream& os) const;
     private:
         int color_;
 
