@@ -32,25 +32,36 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
           std::make_unique<SlamBlockSolver>(move(linearSolver)));
     
     optimizer_.setAlgorithm(solver);
+    optimizer_.setVerbose(true);
+    
+    VertexSE2* initial_pose = new VertexSE2();
+    initial_pose->setId(pose_id_counter_);
+    initial_pose->setEstimate(SE2(0, 0, 0));
+    initial_pose->setFixed(true); // Fix the initial pose to anchor the graph
+    optimizer_.addVertex(initial_pose);
+
 }
 
 GraphSLAM::~GraphSLAM()
 {
     this->optimizer_.save("final_graph.g2o");
+    this->optimizer_.initializeOptimization();
+    this->optimizer_.optimize(10);
+    this->optimizer_.save("optimized_graph.g2o");
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
 }
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
 {
-    RCLCPP_INFO(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
+    RCLCPP_DEBUG(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
 
     // TODO : replace placeholders with real values
     const long current_pose_id = pose_id_counter_;
+    const auto robot_pose_ =this->current_pose_; 
     g2o::OptimizableGraph::Vertex* v = optimizer_.vertex(current_pose_id);
     const auto &verts = optimizer_.vertices();
     if (v){
-        const auto robot_pose_ =this->current_pose_; 
         lart_msgs::msg::ConeArray map_cones_ = lart_msgs::msg::ConeArray();
         for (const auto &kv : verts) {
             auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
@@ -64,6 +75,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             cone.position.y = est[1];
             cone.position.z = 0.0;
             cone.class_type.data = v_landmark->color();
+            cone.cone_id.data = v_landmark->id();
             map_cones_.cones.push_back(cone);
         }
         
@@ -74,6 +86,13 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     
         for (size_t i = 0; i < msg->cones.size(); ++i){
             long landmark_id = -1;
+            double x = msg->cones[i].position.x;
+            double y = msg->cones[i].position.y;
+            double d = std::sqrt(x*x + y*y);
+
+            if (d > 10 )
+                continue; // Skip observations that are too far away, likely outliers
+
             if (matches[i] != -1){
                 landmark_id= matches[i];
     
@@ -92,9 +111,6 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     
             Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
     
-            double x = msg->cones[i].position.x;
-            double y = msg->cones[i].position.y;
-            double d = std::sqrt(x*x + y*y);
     
             double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
             double sigma_y = k_lateral * d + base_lateral_uncertainty_;
@@ -114,7 +130,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
         RCLCPP_WARN(this->get_logger(), "Current pose vertex not found in the graph. Probably no pose initialized.");
     }
 
-    //print all landmarks in the graph
+    // //print all landmarks in the graph
     // RCLCPP_INFO(this->get_logger(), "Current landmarks in the graph:");
     // for (const auto &kv : verts) {
     //     auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
@@ -130,6 +146,23 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
 {
     float current_rpm = (float)msg->rpm;
     float ms_speed = TIRE_PERIMETER_M * (current_rpm / TRANSMISSION_RATIO / 60.0);
+    this->velocity_ = ms_speed;
+
+    tuple<double, double, double> deltas = this->compute_predicted_pose(this->velocity_, this->angular_velocity_); // Assuming velocity is 0 for prediction, can be replaced with actual velocity if available
+    
+    VertexSE2* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
+
+    VertexSE2* new_pose_vertex =  new VertexSE2();
+    new_pose_vertex->setId(++pose_id_counter_);
+    new_pose_vertex->setEstimate(SE2(current_pose_[0], current_pose_[1], current_pose_[2]));
+    optimizer_.addVertex(new_pose_vertex);
+
+    EdgeSE2* odom_edge = new EdgeSE2();
+    odom_edge->setVertex(0, current_pose_vertex);
+    odom_edge->setVertex(1, new_pose_vertex);
+    odom_edge->setMeasurement(SE2(get<0>(deltas), get<1>(deltas), get<2>(deltas)));
+    odom_edge->setInformation(Eigen::Matrix3d::Identity());
+    optimizer_.addEdge(odom_edge);
     RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
 
 }
@@ -137,15 +170,16 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
 void GraphSLAM::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg)
 {
     this->angular_velocity_ = msg->vector.z;
+    
     RCLCPP_DEBUG(this->get_logger(), "Received IMU angular velocity message: %f", this->angular_velocity_);
 }
 
-void GraphSLAM::compute_predicted_pose(float velocity, float omega_z)
+tuple<double,double,double> GraphSLAM::compute_predicted_pose(float velocity, float omega_z)
 {
     auto now = chrono::steady_clock::now();
     if (last_predict_time_.time_since_epoch().count() == 0) {
         last_predict_time_ = now;
-        return;
+        return make_tuple(0.0, 0.0, 0.0); // No movement on the first call
     }
 
     double dt = chrono::duration<double>(now - last_predict_time_).count();
@@ -171,6 +205,8 @@ void GraphSLAM::compute_predicted_pose(float velocity, float omega_z)
 
     // Normalize angle to [-pi, pi]
     current_pose_[2] = atan2(sin(current_pose_[2]), cos(current_pose_[2]));
+
+    return make_tuple(dx, dy, w * dt);
 }
 
 int main(int argc, char *argv[])

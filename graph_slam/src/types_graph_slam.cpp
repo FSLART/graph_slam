@@ -22,6 +22,6 @@ namespace g2o {
 
     G2O_REGISTER_TYPE_GROUP(graph_slam);
 
-    G2O_REGISTER_TYPE_NAME("VertexLandmark2D", VertexLandmark2D);
+    G2O_REGISTER_TYPE_NAME("VERTEXLANDMARK2D", VertexLandmark2D);
 
 }

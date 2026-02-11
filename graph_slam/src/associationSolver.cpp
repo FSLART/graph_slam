@@ -98,7 +98,7 @@ public:
                 if (d_squared < best_dist)
                 {
                     best_dist = d_squared;
-                    best_index = static_cast<int>(j);
+                    best_index = static_cast<int>(map_cones.cones[j].cone_id.data);
                 }
             }
             
