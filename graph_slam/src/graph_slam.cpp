@@ -47,68 +47,74 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
     // TODO : replace placeholders with real values
     const long current_pose_id = pose_id_counter_;
-    const auto robot_pose_ =this->current_pose_; 
-    lart_msgs::msg::ConeArray map_cones_ = lart_msgs::msg::ConeArray();
+    g2o::OptimizableGraph::Vertex* v = optimizer_.vertex(current_pose_id);
     const auto &verts = optimizer_.vertices();
-    for (const auto &kv : verts) {
-        auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
-        if (!v_landmark) {
-            continue; // skip non-landmark vertices
-        }
-
-        const Eigen::Vector2d &est = v_landmark->estimate();
-        lart_msgs::msg::Cone cone;
-        cone.position.x = est[0];
-        cone.position.y = est[1];
-        cone.position.z = 0.0;
-        cone.class_type.data = v_landmark->color();
-        map_cones_.cones.push_back(cone);
-    }
+    if (v){
+        const auto robot_pose_ =this->current_pose_; 
+        lart_msgs::msg::ConeArray map_cones_ = lart_msgs::msg::ConeArray();
+        for (const auto &kv : verts) {
+            auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
+            if (!v_landmark) {
+                continue; // skip non-landmark vertices
+            }
     
-    pair<vector<int>, lart_msgs::msg::ConeArray> association_result = association_solver_->associate(*msg, map_cones_, robot_pose_);
-    
-    const auto matches = association_result.first;
-    const auto obs_global = association_result.second;
-
-    for (size_t i = 0; i < msg->cones.size(); ++i){
-        long landmark_id = -1;
-        if (matches[i] != -1){
-            landmark_id= matches[i];
-
-            RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
-        } else {
-            VertexLandmark2D* landmark = new VertexLandmark2D();
-            landmark->setId(++landmark_id_counter_);
-            landmark->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
-            landmark->setColor(msg->cones[i].class_type.data);
-            this->optimizer_.addVertex(landmark);
-
-            landmark_id = landmark_id_counter_;
-
-            RCLCPP_DEBUG(this->get_logger(), "Observation %zu is a new cone.", i);
+            const Eigen::Vector2d &est = v_landmark->estimate();
+            lart_msgs::msg::Cone cone;
+            cone.position.x = est[0];
+            cone.position.y = est[1];
+            cone.position.z = 0.0;
+            cone.class_type.data = v_landmark->color();
+            map_cones_.cones.push_back(cone);
         }
-
-        Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
-
-        double x = msg->cones[i].position.x;
-        double y = msg->cones[i].position.y;
-
-        double sigma_x = k_depth * std::pow(x, depth_weight) + base_depth_uncertainty_;
-        double sigma_y = k_lateral * x + base_lateral_uncertainty_;
-
-        information(0, 0) = 1.0 / (sigma_x * sigma_x); // Inverse of sigma_x^2
-        information(1, 1) = 1.0 / (sigma_y * sigma_y); // Inverse of sigma_y^2
-
-
-        EdgeSE2PointXY* edge = new EdgeSE2PointXY();
-        edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
-        edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id)));
-        edge->setMeasurement(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
-        edge->setInformation(information); // Use the computed information matrix
-        this->optimizer_.addEdge(edge);
+        
+        pair<vector<int>, lart_msgs::msg::ConeArray> association_result = association_solver_->associate(*msg, map_cones_, robot_pose_);
+        
+        const auto matches = association_result.first;
+        const auto obs_global = association_result.second;
+    
+        for (size_t i = 0; i < msg->cones.size(); ++i){
+            long landmark_id = -1;
+            if (matches[i] != -1){
+                landmark_id= matches[i];
+    
+                RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
+            } else {
+                VertexLandmark2D* landmark = new VertexLandmark2D();
+                landmark->setId(++landmark_id_counter_);
+                landmark->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
+                landmark->setColor(msg->cones[i].class_type.data);
+                this->optimizer_.addVertex(landmark);
+    
+                landmark_id = landmark_id_counter_;
+    
+                RCLCPP_DEBUG(this->get_logger(), "Observation %zu is a new cone.", i);
+            }
+    
+            Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
+    
+            double x = msg->cones[i].position.x;
+            double y = msg->cones[i].position.y;
+            double d = std::sqrt(x*x + y*y);
+    
+            double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
+            double sigma_y = k_lateral * d + base_lateral_uncertainty_;
+    
+            information(0, 0) = 1.0 / (sigma_x * sigma_x); // Inverse of sigma_x^2
+            information(1, 1) = 1.0 / (sigma_y * sigma_y); // Inverse of sigma_y^2
+    
+    
+            EdgeSE2PointXY* edge = new EdgeSE2PointXY();
+            edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
+            edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id)));
+            edge->setMeasurement(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
+            edge->setInformation(information); // Use the computed information matrix
+            this->optimizer_.addEdge(edge);
+        }
+    }else {
+        RCLCPP_WARN(this->get_logger(), "Current pose vertex not found in the graph. Probably no pose initialized.");
     }
 
-    // //print all landmarks in the graph
+    //print all landmarks in the graph
     // RCLCPP_INFO(this->get_logger(), "Current landmarks in the graph:");
     // for (const auto &kv : verts) {
     //     auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
