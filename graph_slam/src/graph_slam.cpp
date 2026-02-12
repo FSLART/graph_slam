@@ -32,6 +32,15 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
           std::make_unique<SlamBlockSolver>(move(linearSolver)));
     
     optimizer_.setAlgorithm(solver);
+
+    SparseOptimizerTerminateAction* terminate_action = new SparseOptimizerTerminateAction();
+
+    //Set stop criteria for optimization
+    terminate_action->setMaxIterations(10);
+    terminate_action->setGainThreshold(1e-4);
+    optimizer_.addPostIterationAction(terminate_action);
+
+    // Enable verbose output for debugging
     optimizer_.setVerbose(true);
     
     VertexSE2* initial_pose = new VertexSE2();
@@ -45,8 +54,27 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 GraphSLAM::~GraphSLAM()
 {
     this->optimizer_.save("final_graph.g2o");
+
+    const auto &verts = optimizer_.vertices();
+    std::vector<std::pair<int, VertexLandmark2D*>> landmarks_to_remove;
+    landmarks_to_remove.reserve(verts.size());
+    for (const auto &kv : verts) {
+        auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
+        if (v_landmark && v_landmark->edges().size() < 3) {
+            landmarks_to_remove.emplace_back(kv.first, v_landmark);
+        }
+    }
+
+    for (const auto &item : landmarks_to_remove) {
+        const int vertex_id = item.first;
+        VertexLandmark2D* v_landmark = item.second;
+        this->optimizer_.removeVertex(v_landmark);
+        RCLCPP_DEBUG(this->get_logger(), "Removed landmark vertex ID %d due to insufficient constraints.", vertex_id);
+    }
+
     this->optimizer_.initializeOptimization();
-    this->optimizer_.optimize(10);
+    const int iterations = this->optimizer_.optimize(10);
+    RCLCPP_INFO(this->get_logger(), "Graph optimization finished (%d iterations).", iterations);
     this->optimizer_.save("optimized_graph.g2o");
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
@@ -161,7 +189,7 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     odom_edge->setVertex(0, current_pose_vertex);
     odom_edge->setVertex(1, new_pose_vertex);
     odom_edge->setMeasurement(SE2(get<0>(deltas), get<1>(deltas), get<2>(deltas)));
-    odom_edge->setInformation(Eigen::Matrix3d::Identity());
+    odom_edge->setInformation(Eigen::Matrix3d::Identity()*50);
     optimizer_.addEdge(odom_edge);
     RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
 
