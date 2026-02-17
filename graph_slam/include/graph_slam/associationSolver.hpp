@@ -8,12 +8,16 @@
 #include <cmath>
 #include <limits>
 
+#include <pcl/registration/icp.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+
 #include <rclcpp/rclcpp.hpp>
 
 #include "lart_msgs/msg/cone_array.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 
-#define ASSOCIATION_EUCLIDIAN_DISTANCE_THRESHOLD_SQUARED 1.0  // meters
+#define ASSOCIATION_EUCLIDIAN_DISTANCE_THRESHOLD_SQUARED 1.2  // meters
 
 class AssociationSolver
 {

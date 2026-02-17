@@ -146,6 +146,78 @@ public:
     }
 };
 
+// ================== ICP backend ==============================================
+
+class ICPBackend : public AssociationSolver::AssociationBackend
+{
+public:
+    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
+                               const lart_msgs::msg::ConeArray &map_cones,
+                               const Eigen::Vector3d &pose) override
+    {
+        lart_msgs::msg::ConeArray obs_global = obsToGlobal(observations, pose);
+        
+        if (map_cones.cones.empty()) {
+            return {std::vector<int>(observations.cones.size(), -1), obs_global};
+        }
+
+        // 1. Convert ROS messages to PCL Clouds
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_obs(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_map(new pcl::PointCloud<pcl::PointXYZ>);
+
+        for (const auto& cone : obs_global.cones)
+            cloud_obs->push_back(pcl::PointXYZ(cone.position.x, cone.position.y, 0));
+
+        for (const auto& cone : map_cones.cones)
+            cloud_map->push_back(pcl::PointXYZ(cone.position.x, cone.position.y, 0));
+
+        // 2. Setup and Run ICP
+        pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+        icp.setInputSource(cloud_obs);
+        icp.setInputTarget(cloud_map);
+        
+        // Settings: Max 1.5m to find a neighbor, stop if change is tiny
+        icp.setMaxCorrespondenceDistance(2); 
+        icp.setTransformationEpsilon(1e-5);
+        icp.setMaximumIterations(10);
+
+        pcl::PointCloud<pcl::PointXYZ> aligned_obs;
+        icp.align(aligned_obs);
+
+        std::vector<int> matches(observations.cones.size(), -1);
+
+        if (icp.hasConverged()) {
+            // 3. Match based on ALIGNED positions
+            for (size_t i = 0; i < aligned_obs.size(); ++i) {
+                int best_index = -1;
+                double best_dist_sq = std::numeric_limits<double>::max();
+
+                for (size_t j = 0; j < map_cones.cones.size(); ++j) {
+                    // Still respect color classes
+                    if(obs_global.cones[i].class_type.data != map_cones.cones[j].class_type.data)
+                        continue;
+
+                    double dx = aligned_obs[i].x - map_cones.cones[j].position.x;
+                    double dy = aligned_obs[i].y - map_cones.cones[j].position.y;
+                    double d_sq = dx*dx + dy*dy;
+
+                    if (d_sq < best_dist_sq) {
+                        best_dist_sq = d_sq;
+                        best_index = static_cast<int>(map_cones.cones[j].cone_id.data);
+                    }
+                }
+
+                // Use a tighter threshold (e.g., 0.4m) since we've already aligned clouds
+                if (best_index != -1 && best_dist_sq < 0.70) { // 0.4^2 = 0.16
+                    matches[i] = best_index;
+                }
+            }
+        }
+
+        return {matches, obs_global};
+    }
+};
+
 // ================== AssociationSolver front-end ==============================
 
 AssociationSolver::AssociationSolver(int mode)
@@ -157,6 +229,9 @@ AssociationSolver::AssociationSolver(int mode)
         break;
     case 1:
         backend_ = std::make_unique<MahalanobisBackend>();
+        break;
+    case 2:
+        backend_ = std::make_unique<ICPBackend>();
         break;
     default:
         throw std::invalid_argument("Unknown association mode");

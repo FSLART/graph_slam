@@ -12,6 +12,7 @@ find_package(lart_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(g2o REQUIRED)
 find_package(fmt REQUIRED)
+find_package(PCL REQUIRED COMPONENTS registration common)
 
 add_executable(graph_slam_node
   src/graph_slam.cpp
@@ -27,6 +28,7 @@ target_include_directories(graph_slam_node PUBLIC
 include_directories(
   include
   ${CMAKE_SOURCE_DIR}/../../lart_common
+  ${PCL_INCLUDE_DIRS}
 )
 
 ament_target_dependencies(graph_slam_node
@@ -41,6 +43,7 @@ target_link_libraries(graph_slam_node
   g2o_types_slam2d
   g2o_solver_eigen
   g2o_stuff
+  ${PCL_LIBRARIES}
 )
 
 install(TARGETS
