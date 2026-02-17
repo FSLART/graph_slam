@@ -54,7 +54,7 @@ private:
     const double base_lateral_uncertainty_ = 0.05; // Base lateral
     const double k_depth = 0.0012;  //longitudinal uncertainty
     const double k_lateral = 0.04; //lateral uncertainty
-    const double depth_weight = 2.9; //exponential weight for depth uncertainty
+    const double depth_weight = 1.5; //exponential weight for depth uncertainty
 
 protected:
     AssociationSolver *association_solver_;

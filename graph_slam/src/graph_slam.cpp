@@ -96,8 +96,13 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             if (!v_landmark) {
                 continue; // skip non-landmark vertices
             }
-    
             const Eigen::Vector2d &est = v_landmark->estimate();
+
+            double d = (est - Eigen::Vector2d(robot_pose_[0], robot_pose_[1])).norm();
+            if (d > 15) {
+                continue; // Skip landmarks that are too far away, likely outliers
+            }
+    
             lart_msgs::msg::Cone cone;
             cone.position.x = est[0];
             cone.position.y = est[1];
@@ -151,6 +156,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
             edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id)));
             edge->setMeasurement(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
+            // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
             edge->setInformation(information); // Use the computed information matrix
             this->optimizer_.addEdge(edge);
         }
@@ -189,7 +195,7 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     odom_edge->setVertex(0, current_pose_vertex);
     odom_edge->setVertex(1, new_pose_vertex);
     odom_edge->setMeasurement(SE2(get<0>(deltas), get<1>(deltas), get<2>(deltas)));
-    odom_edge->setInformation(Eigen::Matrix3d::Identity()*50);
+    odom_edge->setInformation(Eigen::Matrix3d::Identity()*120);
     optimizer_.addEdge(odom_edge);
     RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
 

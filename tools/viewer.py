@@ -36,7 +36,7 @@ yellow_landmarks = {}
 orange_landmarks = {}
 big_orange_landmarks = {}
 
-with open("/home/andre-lopes/Desktop/ros2_ws/final_graph.g2o", "r") as f:
+with open("/home/andre-lopes/Desktop/ros2_ws/optimized_graph.g2o", "r") as f:
     for line in f:
         parts = line.split()
         if not parts:
@@ -116,8 +116,8 @@ if show_pose_landmark_edges:
         if from_id in poses and to_id in landmarks:
             x1, y1 = poses[from_id]
             x2, y2 = landmarks[to_id]
-            plt.plot([x1, x2], [y1, y2], c="#53F4B6FF", linewidth=0.05, alpha=0.5)
+            plt.plot([x1, x2], [y1, y2], c="#53F4B6FF", linewidth=0.4, alpha=0.5)
 
-plt.legend()
+plt.legend(loc="upper right")
 plt.axis("equal")
 plt.show()
