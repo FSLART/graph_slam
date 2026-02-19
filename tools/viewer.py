@@ -1,4 +1,7 @@
+import os
+
 import matplotlib.pyplot as plt
+import yaml
 
 # Black/dark mode for Matplotlib figures (readable on dark terminals)
 plt.style.use("dark_background")
@@ -21,7 +24,7 @@ plt.rcParams.update(
 # Maps from vertex id -> (x, y)
 poses = {}
 
-show_pose_landmark_edges = True
+show_pose_landmark_edges = False
 show_odmetry_edges = False
 
 # Lists of (from_id, to_id) for different edge types
@@ -116,7 +119,74 @@ if show_pose_landmark_edges:
         if from_id in poses and to_id in landmarks:
             x1, y1 = poses[from_id]
             x2, y2 = landmarks[to_id]
-            plt.plot([x1, x2], [y1, y2], c="#53F4B6FF", linewidth=0.4, alpha=0.5)
+            plt.plot([x1, x2], [y1, y2], c="#53F4B6FF", linewidth=0.3, alpha=0.5)
+
+# Overlay ground-truth map from YAML (cones and centerline)
+script_dir = os.path.dirname(__file__)
+yaml_path = os.path.join(script_dir, "FSG_2025_map.yaml")
+
+try:
+    with open(yaml_path, "r") as yf:
+        yaml_data = yaml.safe_load(yf) or {}
+
+    track_map = yaml_data.get("map", {})
+
+    # Ground-truth blue cones
+    gt_blue = track_map.get("blue_cones", [])
+    if gt_blue:
+        bx, by = zip(*gt_blue)
+        plt.scatter(
+            bx,
+            by,
+            facecolors="none",
+            edgecolors="cyan",
+            s=35,
+            label="GT Blue Cones",
+        )
+
+    # Ground-truth yellow cones
+    gt_yellow = track_map.get("yellow_cones", [])
+    if gt_yellow:
+        yx, yy = zip(*gt_yellow)
+        plt.scatter(
+            yx,
+            yy,
+            facecolors="none",
+            edgecolors="yellow",
+            s=35,
+            label="GT Yellow Cones",
+        )
+
+    # Ground-truth big orange cones
+    gt_big_orange = track_map.get("big_orange_cones", [])
+    if gt_big_orange:
+        ox, oy = zip(*gt_big_orange)
+        plt.scatter(
+            ox,
+            oy,
+            facecolors="none",
+            edgecolors="orange",
+            s=50,
+            marker="^",
+            label="GT Big Orange Cones",
+        )
+
+    # Ground-truth centerline
+    gt_centerline = track_map.get("centerline", [])
+    if gt_centerline:
+        cx, cy = zip(*gt_centerline)
+        plt.plot(
+            cx,
+            cy,
+            color="gray",
+            linestyle="--",
+            alpha=0.7,
+            label="GT Centerline",
+        )
+except FileNotFoundError:
+    print(f"Ground-truth map file not found at {yaml_path}; skipping GT plot.")
+except Exception as e:
+    print(f"Failed to load ground-truth map: {e}")
 
 plt.legend(loc="upper right")
 plt.axis("equal")

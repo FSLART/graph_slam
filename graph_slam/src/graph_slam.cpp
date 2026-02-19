@@ -60,7 +60,7 @@ GraphSLAM::~GraphSLAM()
     landmarks_to_remove.reserve(verts.size());
     for (const auto &kv : verts) {
         auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
-        if (v_landmark && v_landmark->edges().size() < 3) {
+        if (v_landmark && v_landmark->edges().size() < 4) {
             landmarks_to_remove.emplace_back(kv.first, v_landmark);
         }
     }
@@ -82,14 +82,15 @@ GraphSLAM::~GraphSLAM()
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
 {
+    auto start_time = std::chrono::steady_clock::now();
     RCLCPP_DEBUG(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
 
     // TODO : replace placeholders with real values
     const long current_pose_id = pose_id_counter_;
     const auto robot_pose_ =this->current_pose_; 
-    g2o::OptimizableGraph::Vertex* v = optimizer_.vertex(current_pose_id);
+    g2o::OptimizableGraph::Vertex* v_pose = optimizer_.vertex(current_pose_id);
     const auto &verts = optimizer_.vertices();
-    if (v){
+    if (v_pose){
         lart_msgs::msg::ConeArray map_cones_ = lart_msgs::msg::ConeArray();
         for (const auto &kv : verts) {
             auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
@@ -129,6 +130,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             if (matches[i] != -1){
                 landmark_id= matches[i];
     
+                dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
             } else {
                 VertexLandmark2D* landmark = new VertexLandmark2D();
@@ -156,8 +158,10 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
             edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id)));
             edge->setMeasurement(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
+
             // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
             edge->setInformation(information); // Use the computed information matrix
+
             this->optimizer_.addEdge(edge);
         }
     }else {
@@ -173,6 +177,9 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     //         RCLCPP_INFO(this->get_logger(), "Landmark ID: %d, Position: (%.2f, %.2f), Color: %d", v_landmark->id(), est[0], est[1], v_landmark->color());
     //     }
     // }
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %ld ms.", duration);
 
 }
 
