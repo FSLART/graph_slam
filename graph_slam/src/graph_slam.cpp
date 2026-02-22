@@ -25,30 +25,18 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
         IMU_TOPIC, 10,
         bind(&GraphSLAM::imu_callback, this, _1));
     
-    auto linearSolver = std::make_unique<SlamLinearSolver>();
-
-    OptimizationAlgorithmGaussNewton* solver =
-      new OptimizationAlgorithmGaussNewton(
-          std::make_unique<SlamBlockSolver>(move(linearSolver)));
     
-    optimizer_.setAlgorithm(solver);
-
-    SparseOptimizerTerminateAction* terminate_action = new SparseOptimizerTerminateAction();
-
-    //Set stop criteria for optimization
-    terminate_action->setMaxIterations(10);
-    terminate_action->setGainThreshold(1e-4);
-    optimizer_.addPostIterationAction(terminate_action);
-
-    // Enable verbose output for debugging
-    optimizer_.setVerbose(true);
+    //Create instance of the incremental graph optimizer
+    SparseOptimizerIncremental optimizer;
+    optimizer.setVerbose(verbose);
     
-    VertexSE2* initial_pose = new VertexSE2();
-    initial_pose->setId(pose_id_counter_);
-    initial_pose->setEstimate(SE2(0, 0, 0));
-    initial_pose->setFixed(true); // Fix the initial pose to anchor the graph
-    optimizer_.addVertex(initial_pose);
+    //Create instance of the SLAM interface and set parameters
+    G2oSlamInterface slamInterface(&optimizer);
+    slamInterface.setUpdateGraphEachN(4); //Smaller updates
+    slamInterface.setBatchSolveEachN(500); // Larger batch optimizations
 
+    //Initialize the SLAM interface (sets up the solver)
+    slamInterface.initialize();
 }
 
 GraphSLAM::~GraphSLAM()
