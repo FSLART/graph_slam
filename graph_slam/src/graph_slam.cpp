@@ -115,38 +115,39 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
                 continue; // Skip observations that are too far away, likely outliers
 
             if (matches[i] != -1){
-                landmark_id= matches[i];
+                landmark_id = matches[i];
     
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
             } else {
-                VertexLandmark2D* landmark = new VertexLandmark2D();
-                landmark->setId(++landmark_id_counter_);
-                landmark->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
-                landmark->setColor(msg->cones[i].class_type.data);
-                this->optimizer_.addVertex(landmark);
-    
-                landmark_id = landmark_id_counter_;
-    
-                RCLCPP_DEBUG(this->get_logger(), "Observation %zu is a new cone.", i);
+                // No association found, create new landmark
+                landmark_id = ++landmark_id_counter_;
             }
-    
-            Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
-    
+            
+            // Setting the current pose Id
+            const int from_id = static_cast<int>(current_pose_id);
+            const int to_id   = static_cast<int>(landmark_id);
+
+            // Compute the measurement matrix
+
+            const std::vector<double> measurement{x, y, 0.0};
+
+            // Compute the information matrix based on the distance to the landmark
+            Eigen::Matrix3d info = Eigen::Matrix3d::Identity();
     
             double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
             double sigma_y = k_lateral * d + base_lateral_uncertainty_;
     
-            information(0, 0) = 1.0 / (sigma_x * sigma_x); // Inverse of sigma_x^2
-            information(1, 1) = 1.0 / (sigma_y * sigma_y); // Inverse of sigma_y^2
-    
-    
-            EdgeSE2PointXY* edge = new EdgeSE2PointXY();
-            edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
-            edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id)));
-            edge->setMeasurement(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
-            // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
-            edge->setInformation(information); // Use the computed information matrix
-            this->optimizer_.addEdge(edge);
+            info(0, 0) = 1.0 / (sigma_x * sigma_x); // Inverse of sigma_x^2
+            info(1, 1) = 1.0 / (sigma_y * sigma_y); // Inverse of sigma_y^2
+
+            const std::vector<double> information{
+                info(0,0), info(0,1), info(0,2),
+                        info(1,1), info(1,2),
+                                    info(2,2)
+            };
+
+            slamInterface_->addEdge(from_id, to_id, measurement, information);
+
         }
     }else {
         RCLCPP_WARN(this->get_logger(), "Current pose vertex not found in the graph. Probably no pose initialized.");
