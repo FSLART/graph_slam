@@ -40,7 +40,8 @@ private:
     rclcpp::Subscription<lart_msgs::msg::Dynamics>::SharedPtr dynamics_subscriber_;
     rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr imu_subscriber_;
 
-    g2o::SparseOptimizer optimizer_;
+    g2o::SparseOptimizerIncremental optimizer_;
+    g2o::G2oSlamInterface slamInterface_;
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
     using SlamLinearSolver = g2o::LinearSolverEigen<SlamBlockSolver::PoseMatrixType>;
     long landmark_id_counter_ = -1;

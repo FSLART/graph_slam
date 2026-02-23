@@ -27,16 +27,16 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     
     
     //Create instance of the incremental graph optimizer
-    SparseOptimizerIncremental optimizer;
-    optimizer.setVerbose(verbose);
+    optimizer_ = SparseOptimizerIncremental();
+    optimizer_->setVerbose(false);
     
     //Create instance of the SLAM interface and set parameters
-    G2oSlamInterface slamInterface(&optimizer);
-    slamInterface.setUpdateGraphEachN(4); //Smaller updates
-    slamInterface.setBatchSolveEachN(500); // Larger batch optimizations
+    slamInterface_ = G2oSlamInterface(&optimizer_);
+    slamInterface_.setUpdateGraphEachN(4); //Smaller updates
+    slamInterface_.setBatchSolveEachN(500); // Larger batch optimizations
 
     //Initialize the SLAM interface (sets up the solver)
-    slamInterface.initialize();
+    slamInterface_.initialize();
 }
 
 GraphSLAM::~GraphSLAM()
@@ -167,26 +167,37 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
 {
     float current_rpm = (float)msg->rpm;
-    float ms_speed = TIRE_PERIMETER_M * (current_rpm / TRANSMISSION_RATIO / 60.0);
+    float ms_speed = TIRE_PERIMETER_M * (current_rpm / TRANSMISSION_RATIO / 60.0f);
     this->velocity_ = ms_speed;
 
-    tuple<double, double, double> deltas = this->compute_predicted_pose(this->velocity_, this->angular_velocity_); // Assuming velocity is 0 for prediction, can be replaced with actual velocity if available
-    
-    VertexSE2* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
+    const auto deltas = this->compute_predicted_pose(this->velocity_, this->angular_velocity_);
 
-    VertexSE2* new_pose_vertex =  new VertexSE2();
-    new_pose_vertex->setId(++pose_id_counter_);
-    new_pose_vertex->setEstimate(SE2(current_pose_[0], current_pose_[1], current_pose_[2]));
-    optimizer_.addVertex(new_pose_vertex);
+    const int from_id = static_cast<int>(pose_id_counter_);
+    const int to_id   = static_cast<int>(pose_id_counter_ + 1);
 
-    EdgeSE2* odom_edge = new EdgeSE2();
-    odom_edge->setVertex(0, current_pose_vertex);
-    odom_edge->setVertex(1, new_pose_vertex);
-    odom_edge->setMeasurement(SE2(get<0>(deltas), get<1>(deltas), get<2>(deltas)));
-    odom_edge->setInformation(Eigen::Matrix3d::Identity()*120);
-    optimizer_.addEdge(odom_edge);
+    // measurement = [dx, dy, dtheta]
+    const std::vector<double> measurement{
+        std::get<0>(deltas),
+        std::get<1>(deltas),
+        std::get<2>(deltas)
+    };
+
+    // information (upper-triangular): I00 I01 I02 I11 I12 I22
+    const Eigen::Matrix3d info = Eigen::Matrix3d::Identity() * 120.0;
+    const std::vector<double> information{
+        info(0,0), info(0,1), info(0,2),
+                  info(1,1), info(1,2),
+                            info(2,2)
+    };
+
+    slam_interface_->addEdge(from_id, to_id, measurement, information);
+
+    pose_id_counter_ = to_id;
+
+    //triggers optimization when enough new nodes were added
+    slam_interface_->solveState();
+
     RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
-
 }
 
 void GraphSLAM::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg)
