@@ -56,6 +56,10 @@ private:
     const double k_lateral = 0.04; //lateral uncertainty
     const double depth_weight = 1.5; //exponential weight for depth uncertainty
 
+    long frame_count_ = 0;
+    long observation_count_ = 0;
+    double time_sum_ = 0.0;
+
 protected:
     AssociationSolver *association_solver_;
 };

@@ -53,6 +53,7 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 
 GraphSLAM::~GraphSLAM()
 {
+    RCLCPP_INFO(this->get_logger(), "average processing time per ConeArray: %.3f ms", time_sum_ / observation_count_);
     this->optimizer_.save("final_graph.g2o");
 
     const auto &verts = optimizer_.vertices();
@@ -84,6 +85,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 {
     auto start_time = std::chrono::steady_clock::now();
     RCLCPP_DEBUG(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
+    this->observation_count_++;
 
     // TODO : replace placeholders with real values
     const long current_pose_id = pose_id_counter_;
@@ -150,8 +152,8 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
             double sigma_y = k_lateral * d + base_lateral_uncertainty_;
     
-            information(0, 0) = 1.0 / (sigma_x * sigma_x); // Inverse of sigma_x^2
-            information(1, 1) = 1.0 / (sigma_y * sigma_y); // Inverse of sigma_y^2
+            information(0, 0) = (1.0 / (sigma_x * sigma_x))/2; // Inverse of sigma_x^2
+            information(1, 1) = (1.0 / (sigma_y * sigma_y))/2; // Inverse of sigma_y^2
     
     
             EdgeSE2PointXY* edge = new EdgeSE2PointXY();
@@ -178,13 +180,19 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     //     }
     // }
     auto end_time = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %ld ms.", duration);
+    auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+    time_sum_ += duration_ms;
+    RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %.3f ms.", duration_ms);
 
 }
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
 {
+    if (frame_count_ % 5 != 0) {
+        frame_count_++;
+        return; // Skip this callback to reduce frequency
+    }
+    frame_count_ ++;
     float current_rpm = (float)msg->rpm;
     float ms_speed = TIRE_PERIMETER_M * (current_rpm / TRANSMISSION_RATIO / 60.0);
     this->velocity_ = ms_speed;

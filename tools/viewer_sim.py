@@ -39,7 +39,7 @@ yellow_landmarks = {}
 orange_landmarks = {}
 big_orange_landmarks = {}
 
-with open("/home/andre-lopes/Desktop/ros2_ws/g2o_files/autoz_fsg_acceptable_result/final_graph.g2o", "r") as f:
+with open("/home/andre-lopes/Desktop/ros2_ws/final_graph.g2o", "r") as f:
     for line in f:
         parts = line.split()
         if not parts:
@@ -122,69 +122,60 @@ if show_pose_landmark_edges:
             plt.plot([x1, x2], [y1, y2], c="#53F4B6FF", linewidth=0.2, alpha=0.5)
 
 # Overlay ground-truth map from YAML (cones and centerline)
-script_dir = os.path.dirname(__file__)
-yaml_path = os.path.join(script_dir, "FSG_2025_map.yaml")
-
 try:
-    with open(yaml_path, "r") as yf:
+    with open("/home/andre-lopes/Desktop/ros2_ws/src/PacSim/tracks/FSO20.yaml", "r") as yf:
         yaml_data = yaml.safe_load(yf) or {}
 
-    track_map = yaml_data.get("map", {})
+    # The data is nested under 'track' based on your YAML snippet
+    track_data = yaml_data.get("track", {})
 
-    # Ground-truth blue cones
-    gt_blue = track_map.get("blue_cones", [])
-    if gt_blue:
-        bx, by = zip(*gt_blue)
+    # 1. Ground-truth blue cones (from 'left' lane)
+    left_lane = track_data.get("left", [])
+    if left_lane:
+        # Extract x and y from [x, y, z] position list
+        bx = [cone["position"][0] for cone in left_lane if cone.get("class") == "blue"]
+        by = [cone["position"][1] for cone in left_lane if cone.get("class") == "blue"]
         plt.scatter(
-            bx,
-            by,
+            bx, by,
             facecolors="none",
             edgecolors="cyan",
             s=35,
             label="GT Blue Cones",
         )
 
-    # Ground-truth yellow cones
-    gt_yellow = track_map.get("yellow_cones", [])
-    if gt_yellow:
-        yx, yy = zip(*gt_yellow)
+    # 2. Ground-truth yellow cones (from 'right' lane)
+    right_lane = track_data.get("right", [])
+    if right_lane:
+        yx = [cone["position"][0] for cone in right_lane if cone.get("class") == "yellow"]
+        yy = [cone["position"][1] for cone in right_lane if cone.get("class") == "yellow"]
         plt.scatter(
-            yx,
-            yy,
+            yx, yy,
             facecolors="none",
             edgecolors="yellow",
             s=35,
             label="GT Yellow Cones",
         )
 
-    # Ground-truth big orange cones
-    gt_big_orange = track_map.get("big_orange_cones", [])
-    if gt_big_orange:
-        ox, oy = zip(*gt_big_orange)
+    # 3. Ground-truth big orange cones (appearing in 'right' and 'unknown' sections)
+    # This searches both lanes for the 'big-orange' class
+    ox, oy = [], []
+    for section in ["right", "unknown"]:
+        cones = track_data.get(section, [])
+        ox.extend([c["position"][0] for c in cones if c.get("class") == "big-orange"])
+        oy.extend([c["position"][1] for c in cones if c.get("class") == "big-orange"])
+    
+    if ox:
         plt.scatter(
-            ox,
-            oy,
+            ox, oy,
             facecolors="none",
             edgecolors="orange",
-            s=50,
+            s=70,
             marker="^",
             label="GT Big Orange Cones",
         )
 
-    # Ground-truth centerline
-    gt_centerline = track_map.get("centerline", [])
-    if gt_centerline:
-        cx, cy = zip(*gt_centerline)
-        plt.plot(
-            cx,
-            cy,
-            color="gray",
-            linestyle="--",
-            alpha=0.7,
-            label="GT Centerline",
-        )
 except FileNotFoundError:
-    print(f"Ground-truth map file not found at {yaml_path}; skipping GT plot.")
+    print(f"Ground-truth map file not found at {yaml_path}")
 except Exception as e:
     print(f"Failed to load ground-truth map: {e}")
 
