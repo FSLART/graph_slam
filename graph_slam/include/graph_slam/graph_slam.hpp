@@ -3,11 +3,16 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include "graph_slam/associationSolver.hpp"
-#include "lart_msgs/msg/dynamics.hpp"
-#include "geometry_msgs/msg/vector3_stamped.hpp"
-#include "lart_msgs/msg/cone_array.hpp"
-#include <geometry_msgs/msg/pose_stamped.hpp>
+
 #include "lart_common.h"
+#include "lart_msgs/msg/dynamics.hpp"
+#include "lart_msgs/msg/cone_array.hpp"
+#include "lart_msgs/msg/mission.hpp"
+#include "lart_msgs/msg/slam_stats.hpp"
+
+#include <geometry_msgs/msg/vector3_stamped.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+
 #include <chrono>
 
 #include <g2o/core/sparse_optimizer.h>
@@ -34,11 +39,17 @@ public:
     void observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg);
     void dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg);
     void imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
+    void mission_callback(const lart_msgs::msg::Mission::SharedPtr msg);
     std::tuple<double, double, double> compute_predicted_pose(float velocity, float omega_z);
 private:
+    //Subscriptions
     rclcpp::Subscription<lart_msgs::msg::ConeArray>::SharedPtr observations_subscriber_;
     rclcpp::Subscription<lart_msgs::msg::Dynamics>::SharedPtr dynamics_subscriber_;
     rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr imu_subscriber_;
+    rclcpp::Subscription<lart_msgs::msg::Mission>::SharedPtr mission_subscriber_;
+    
+    //Publishers
+    rclcpp::Publisher<lart_msgs::msg::SlamStats>::SharedPtr slam_stats_publisher_;
 
     g2o::SparseOptimizer optimizer_;
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
@@ -49,6 +60,7 @@ private:
     float velocity_ = 0.0;
     std::chrono::steady_clock::time_point last_predict_time_{};
     Eigen::Vector3d current_pose_{0.0, 0.0, 0.0}; // x, y, theta
+    bool pose_initialized_ = false;
 
     const double base_depth_uncertainty_ = 0.1; // Base longitudinal uncertainty in meters
     const double base_lateral_uncertainty_ = 0.05; // Base lateral
@@ -56,10 +68,20 @@ private:
     const double k_lateral = 0.04; //lateral uncertainty
     const double depth_weight = 1.5; //exponential weight for depth uncertainty
 
+    // Stats variavbles
     long frame_count_ = 0;
     long observation_count_ = 0;
     double time_sum_ = 0.0;
 
+    lart_msgs::msg::Mission current_mission_;
+    int16_t current_lap_ = -1;
+    double current_lap_distance_ = 0.0;
+    float lap_margin_x_ = 1.0;
+    float lap_margin_y_ = 3.0;
+    float lap_margin_ = 10.0;
+    
+    void check_lap_completion();
+    
 protected:
     AssociationSolver *association_solver_;
 };

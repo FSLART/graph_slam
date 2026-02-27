@@ -8,6 +8,8 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 {
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been started.");
 
+    this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
+
     association_solver_ = new AssociationSolver(ASSOCIATION_MODE);
 
     // Subscribe to the cone observations topic
@@ -24,6 +26,12 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     imu_subscriber_ = this->create_subscription<geometry_msgs::msg::Vector3Stamped>(
         IMU_TOPIC, 10,
         bind(&GraphSLAM::imu_callback, this, _1));
+
+    mission_subscriber_ = this->create_subscription<lart_msgs::msg::Mission>(
+        "/mission", 10,
+        bind(&GraphSLAM::mission_callback, this, _1));
+
+    slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>("/slam/stats", 10);
     
     auto linearSolver = std::make_unique<SlamLinearSolver>();
 
@@ -43,12 +51,6 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     // Enable verbose output for debugging
     optimizer_.setVerbose(true);
     
-    VertexSE2* initial_pose = new VertexSE2();
-    initial_pose->setId(pose_id_counter_);
-    initial_pose->setEstimate(SE2(0, 0, 0));
-    initial_pose->setFixed(true); // Fix the initial pose to anchor the graph
-    optimizer_.addVertex(initial_pose);
-
 }
 
 GraphSLAM::~GraphSLAM()
@@ -83,13 +85,17 @@ GraphSLAM::~GraphSLAM()
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
 {
+    if (!this->pose_initialized_) {
+        RCLCPP_WARN(this->get_logger(), "Pose not initialized yet. Skipping ConeArray processing.");
+        return;
+    }
     auto start_time = std::chrono::steady_clock::now();
     RCLCPP_DEBUG(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
     this->observation_count_++;
 
     // TODO : replace placeholders with real values
     const long current_pose_id = pose_id_counter_;
-    const auto robot_pose_ =this->current_pose_; 
+    const auto robot_pose_ =this->current_pose_;
     g2o::OptimizableGraph::Vertex* v_pose = optimizer_.vertex(current_pose_id);
     const auto &verts = optimizer_.vertices();
     if (v_pose){
@@ -135,6 +141,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
                 dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
             } else {
+                
                 VertexLandmark2D* landmark = new VertexLandmark2D();
                 landmark->setId(++landmark_id_counter_);
                 landmark->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
@@ -182,12 +189,19 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     auto end_time = std::chrono::steady_clock::now();
     auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
     time_sum_ += duration_ms;
-    RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %.3f ms.", duration_ms);
+    // RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %.3f ms.", duration_ms);
+    this->check_lap_completion();
+    RCLCPP_INFO(this->get_logger(), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
 
 }
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
 {
+    if (!this->pose_initialized_) {
+        RCLCPP_WARN(this->get_logger(), "Pose not initialized yet. Skipping new pose calculation.");
+        return;
+    }
+
     if (frame_count_ % 5 != 0) {
         frame_count_++;
         return; // Skip this callback to reduce frequency
@@ -223,6 +237,40 @@ void GraphSLAM::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr
     RCLCPP_DEBUG(this->get_logger(), "Received IMU angular velocity message: %f", this->angular_velocity_);
 }
 
+void GraphSLAM::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg)
+{
+    if (this->pose_initialized_) {
+        RCLCPP_WARN(this->get_logger(), "Mission should not be changing.");
+        return;
+    }
+
+    this->current_mission_.data = msg->data;
+    VertexSE2* initial_pose = new VertexSE2();
+    initial_pose->setId(pose_id_counter_);
+    initial_pose->setFixed(true); // Fix the initial pose to anchor the graph
+
+    switch (this->current_mission_.data){
+        case lart_msgs::msg::Mission::ACCELERATION:
+            initial_pose->setEstimate(SE2(0, 0, 0));
+            this->current_pose_ = Eigen::Vector3d(0, 0, 0);
+        break;
+        
+        case lart_msgs::msg::Mission::SKIDPAD:
+            initial_pose->setEstimate(SE2(-20, 0, 0));
+            this->current_pose_ = Eigen::Vector3d(-20, 0, 0);
+        break;
+        
+        case lart_msgs::msg::Mission::AUTOCROSS:
+        case lart_msgs::msg::Mission::TRACKDRIVE:
+            initial_pose->setEstimate(SE2(-6, 0, 0));
+            this->current_pose_ = Eigen::Vector3d(-6, 0, 0);
+        break;
+    }
+    optimizer_.addVertex(initial_pose);
+    this->pose_initialized_ = true;
+}
+
+
 tuple<double,double,double> GraphSLAM::compute_predicted_pose(float velocity, float omega_z)
 {
     auto now = chrono::steady_clock::now();
@@ -248,6 +296,9 @@ tuple<double,double,double> GraphSLAM::compute_predicted_pose(float velocity, fl
         dy = v * sin(theta) * dt;
     }
 
+    float distance_delta = sqrt(dx*dx + dy*dy);
+    this->current_lap_distance_ += distance_delta;
+
     current_pose_[0] += dx;
     current_pose_[1] += dy;
     current_pose_[2] += w * dt;
@@ -256,6 +307,47 @@ tuple<double,double,double> GraphSLAM::compute_predicted_pose(float velocity, fl
     current_pose_[2] = atan2(sin(current_pose_[2]), cos(current_pose_[2]));
 
     return make_tuple(dx, dy, w * dt);
+}
+
+void GraphSLAM::check_lap_completion()
+{
+    if (this->current_lap_distance_ < lap_margin_ && this->current_lap_ != -1) {
+        return; // you ain't got no motion
+    }
+
+    float x = current_pose_[0];
+    float y = current_pose_[1];
+    float theta = current_pose_[2];
+
+    bool lap_completed = false;
+
+     // Check if we are close to the starting line (e.g., within 1 meter)
+    switch (current_mission_.data){
+        case lart_msgs::msg::Mission::ACCELERATION:
+            if (abs(x) < (lap_margin_x_ - 75.0)) {
+                lap_completed = true;
+            }
+        break;
+        case lart_msgs::msg::Mission::SKIDPAD:
+            if (abs(x) < (lap_margin_x_- 15) && abs(y) < lap_margin_y_) {
+                lap_completed = true;
+            }
+        break;
+        case lart_msgs::msg::Mission::AUTOCROSS:
+        case lart_msgs::msg::Mission::TRACKDRIVE:
+            if (abs(x) < lap_margin_x_ && abs(y) < lap_margin_y_) {
+                lap_completed = true;
+            }
+        break;
+    }
+
+    if (lap_completed) {
+        this->current_lap_++;
+        this->current_lap_distance_ = 0.0; // Reset distance for the next lap
+        if (this->current_lap_ == 1) {
+            // TODO: call full optimization after the first lap is completed
+        }
+    }
 }
 
 int main(int argc, char *argv[])

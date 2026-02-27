@@ -39,7 +39,7 @@ yellow_landmarks = {}
 orange_landmarks = {}
 big_orange_landmarks = {}
 
-with open("/home/andre-lopes/Desktop/ros2_ws/final_graph.g2o", "r") as f:
+with open("/home/andre-lopes/Desktop/ros2_ws/optimized_graph.g2o", "r") as f:
     for line in f:
         parts = line.split()
         if not parts:
@@ -133,7 +133,7 @@ try:
     left_lane = track_data.get("left", [])
     if left_lane:
         # Extract x and y from [x, y, z] position list
-        bx = [cone["position"][0] for cone in left_lane if cone.get("class") == "blue"]
+        bx = [cone["position"][0] - 6.0 for cone in left_lane if cone.get("class") == "blue"]
         by = [cone["position"][1] for cone in left_lane if cone.get("class") == "blue"]
         plt.scatter(
             bx, by,
@@ -146,7 +146,7 @@ try:
     # 2. Ground-truth yellow cones (from 'right' lane)
     right_lane = track_data.get("right", [])
     if right_lane:
-        yx = [cone["position"][0] for cone in right_lane if cone.get("class") == "yellow"]
+        yx = [cone["position"][0] - 6.0 for cone in right_lane if cone.get("class") == "yellow"]
         yy = [cone["position"][1] for cone in right_lane if cone.get("class") == "yellow"]
         plt.scatter(
             yx, yy,
@@ -161,7 +161,7 @@ try:
     ox, oy = [], []
     for section in ["right", "unknown"]:
         cones = track_data.get(section, [])
-        ox.extend([c["position"][0] for c in cones if c.get("class") == "big-orange"])
+        ox.extend([c["position"][0] - 6.0 for c in cones if c.get("class") == "big-orange"])
         oy.extend([c["position"][1] for c in cones if c.get("class") == "big-orange"])
     
     if ox:
