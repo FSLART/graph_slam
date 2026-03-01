@@ -60,7 +60,6 @@ private:
     float velocity_ = 0.0;
     std::chrono::steady_clock::time_point last_predict_time_{};
     Eigen::Vector3d current_pose_{0.0, 0.0, 0.0}; // x, y, theta
-    bool pose_initialized_ = false;
 
     const double base_depth_uncertainty_ = 0.1; // Base longitudinal uncertainty in meters
     const double base_lateral_uncertainty_ = 0.05; // Base lateral
@@ -74,6 +73,7 @@ private:
     double time_sum_ = 0.0;
 
     lart_msgs::msg::Mission current_mission_;
+    bool mission_set_ = false;
     int16_t current_lap_ = -1;
     double current_lap_distance_ = 0.0;
     float lap_margin_x_ = 1.0;

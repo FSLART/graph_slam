@@ -48,9 +48,17 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     terminate_action->setGainThreshold(1e-4);
     optimizer_.addPostIterationAction(terminate_action);
 
+    
+    VertexSE2* initial_pose = new VertexSE2();
+    initial_pose->setId(pose_id_counter_);
+    initial_pose->setFixed(true); // Fix the initial pose to anchor the graph
+    initial_pose->setEstimate(SE2(0, 0, 0));
+    this->current_pose_ = Eigen::Vector3d(0, 0, 0);
+    
+    optimizer_.addVertex(initial_pose);
+    
     // Enable verbose output for debugging
     optimizer_.setVerbose(true);
-    
 }
 
 GraphSLAM::~GraphSLAM()
@@ -85,10 +93,6 @@ GraphSLAM::~GraphSLAM()
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
 {
-    if (!this->pose_initialized_) {
-        RCLCPP_WARN(this->get_logger(), "Pose not initialized yet. Skipping ConeArray processing.");
-        return;
-    }
     auto start_time = std::chrono::steady_clock::now();
     RCLCPP_DEBUG(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
     this->observation_count_++;
@@ -197,11 +201,6 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
 {
-    if (!this->pose_initialized_) {
-        RCLCPP_WARN(this->get_logger(), "Pose not initialized yet. Skipping new pose calculation.");
-        return;
-    }
-
     if (frame_count_ % 5 != 0) {
         frame_count_++;
         return; // Skip this callback to reduce frequency
@@ -233,41 +232,18 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
 void GraphSLAM::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg)
 {
     this->angular_velocity_ = msg->vector.z;
-    
     RCLCPP_DEBUG(this->get_logger(), "Received IMU angular velocity message: %f", this->angular_velocity_);
 }
 
 void GraphSLAM::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg)
 {
-    if (this->pose_initialized_) {
-        RCLCPP_WARN(this->get_logger(), "Mission should not be changing.");
-        return;
+    if(!mission_set_){
+        this->current_mission_ = msg->data;
+        mission_set_ = true;
+        RCLCPP_INFO(this->get_logger(), "Mission set to %d", this->current_mission_.data);
+    } else {
+        RCLCPP_WARN(this->get_logger(), "Mission already set. Ignoring new mission message.");
     }
-
-    this->current_mission_.data = msg->data;
-    VertexSE2* initial_pose = new VertexSE2();
-    initial_pose->setId(pose_id_counter_);
-    initial_pose->setFixed(true); // Fix the initial pose to anchor the graph
-
-    switch (this->current_mission_.data){
-        case lart_msgs::msg::Mission::ACCELERATION:
-            initial_pose->setEstimate(SE2(0, 0, 0));
-            this->current_pose_ = Eigen::Vector3d(0, 0, 0);
-        break;
-        
-        case lart_msgs::msg::Mission::SKIDPAD:
-            initial_pose->setEstimate(SE2(-20, 0, 0));
-            this->current_pose_ = Eigen::Vector3d(-20, 0, 0);
-        break;
-        
-        case lart_msgs::msg::Mission::AUTOCROSS:
-        case lart_msgs::msg::Mission::TRACKDRIVE:
-            initial_pose->setEstimate(SE2(-6, 0, 0));
-            this->current_pose_ = Eigen::Vector3d(-6, 0, 0);
-        break;
-    }
-    optimizer_.addVertex(initial_pose);
-    this->pose_initialized_ = true;
 }
 
 
@@ -311,7 +287,7 @@ tuple<double,double,double> GraphSLAM::compute_predicted_pose(float velocity, fl
 
 void GraphSLAM::check_lap_completion()
 {
-    if (this->current_lap_distance_ < lap_margin_ && this->current_lap_ != -1) {
+    if ((this->current_lap_distance_ < lap_margin_ && this->current_lap_ != -1) || !this->mission_set_) {
         return; // you ain't got no motion
     }
 
@@ -324,18 +300,18 @@ void GraphSLAM::check_lap_completion()
      // Check if we are close to the starting line (e.g., within 1 meter)
     switch (current_mission_.data){
         case lart_msgs::msg::Mission::ACCELERATION:
-            if (abs(x) < (lap_margin_x_ - 75.0)) {
+            if (abs(x-75.0) < lap_margin_x_) {
                 lap_completed = true;
             }
         break;
         case lart_msgs::msg::Mission::SKIDPAD:
-            if (abs(x) < (lap_margin_x_- 15) && abs(y) < lap_margin_y_) {
+            if (abs(x-15.0) < lap_margin_x_ && abs(y) < lap_margin_y_) {
                 lap_completed = true;
             }
         break;
         case lart_msgs::msg::Mission::AUTOCROSS:
         case lart_msgs::msg::Mission::TRACKDRIVE:
-            if (abs(x) < lap_margin_x_ && abs(y) < lap_margin_y_) {
+            if (abs(x-6.0) < lap_margin_x_ && abs(y) < lap_margin_y_) {
                 lap_completed = true;
             }
         break;
