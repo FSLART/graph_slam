@@ -14,16 +14,43 @@ find_package(g2o REQUIRED)
 find_package(fmt REQUIRED)
 find_package(PCL REQUIRED COMPONENTS registration common)
 
+set(G2O_INCREMENTAL_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/../interactive_slam/g2o_incremental)
+set(G2O_INTERACTIVE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/../interactive_slam/g2o_interactive)
+set(INTERACTIVE_SLAM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../interactive_slam)
+
 add_executable(graph_slam_node
   src/graph_slam.cpp
   src/associationSolver.cpp
   src/types_graph_slam.cpp
+  src/slamInterface.cpp
+
+  # incremental optimizer implementation (keep)
+  ${G2O_INCREMENTAL_DIR}/graph_optimizer_sparse_incremental.cpp
+
+  # NOTE: do NOT compile ${G2O_INCREMENTAL_DIR}/g2o_incremental.cpp (it is an example main)
 )
 
 target_include_directories(graph_slam_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
+
+  # local copied example headers
+  ${G2O_INCREMENTAL_DIR}
+  ${G2O_INTERACTIVE_DIR}
+
+  # so includes like "slam_parser/interface/abstract_slam_interface.h" resolve
+  ${INTERACTIVE_SLAM_DIR}
 )
+
+# If your local g2o_interactive folder has these .cpp files, compile them too
+foreach(_src
+  graph_optimizer_sparse_online.cpp
+  types_slam2d_online.cpp
+)
+  if(EXISTS "${G2O_INTERACTIVE_DIR}/${_src}")
+    target_sources(graph_slam_node PRIVATE "${G2O_INTERACTIVE_DIR}/${_src}")
+  endif()
+endforeach()
 
 include_directories(
   include
@@ -44,6 +71,32 @@ target_link_libraries(graph_slam_node
   g2o_solver_eigen
   g2o_stuff
   ${PCL_LIBRARIES}
+)
+
+# --- SuiteSparse / CHOLMOD (required by g2o_incremental) ---
+find_path(SUITESPARSE_INCLUDE_DIR suitesparse/camd.h)
+if(NOT SUITESPARSE_INCLUDE_DIR)
+  message(FATAL_ERROR "SuiteSparse headers not found (expected suitesparse/camd.h). Install libsuitesparse-dev.")
+endif()
+
+find_library(CHOLMOD_LIBRARY cholmod)
+find_library(AMD_LIBRARY amd)
+find_library(CAMD_LIBRARY camd)
+find_library(COLAMD_LIBRARY colamd)
+find_library(CCOLAMD_LIBRARY ccolamd)
+find_library(SUITESPARSECONFIG_LIBRARY suitesparseconfig)
+
+target_include_directories(graph_slam_node PUBLIC
+  ${SUITESPARSE_INCLUDE_DIR}
+)
+
+target_link_libraries(graph_slam_node
+  ${CHOLMOD_LIBRARY}
+  ${AMD_LIBRARY}
+  ${CAMD_LIBRARY}
+  ${COLAMD_LIBRARY}
+  ${CCOLAMD_LIBRARY}
+  ${SUITESPARSECONFIG_LIBRARY}
 )
 
 install(TARGETS

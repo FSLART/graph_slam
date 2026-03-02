@@ -18,6 +18,8 @@
 #include <g2o/types/slam2d/edge_se2.h>
 #include <g2o/types/slam2d/edge_se2_pointxy.h>
 
+#include "graph_optimizer_sparse_incremental.h"
+
 #include "graph_slam/types_graph_slam.h"
 
 #define ASSOCIATION_MODE 0

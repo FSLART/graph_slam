@@ -1,4 +1,4 @@
-#include "g2o_slam_interface.h"
+#include "graph_slam/slamInterface.h"
 
 #include <cassert>
 #include <iostream>
