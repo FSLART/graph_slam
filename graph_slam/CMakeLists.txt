@@ -13,6 +13,9 @@ find_package(geometry_msgs REQUIRED)
 find_package(g2o REQUIRED)
 find_package(fmt REQUIRED)
 find_package(PCL REQUIRED COMPONENTS registration common)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 add_executable(graph_slam_node
   src/graph_slam.cpp
@@ -35,6 +38,9 @@ ament_target_dependencies(graph_slam_node
   rclcpp
   lart_msgs
   geometry_msgs
+  tf2
+  tf2_ros
+  visualization_msgs
 )
 
 target_link_libraries(graph_slam_node

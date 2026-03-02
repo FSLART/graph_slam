@@ -33,6 +33,8 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 
     slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>("/slam/stats", 10);
     
+    map_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/slam/map", 10);
+    
     auto linearSolver = std::make_unique<SlamLinearSolver>();
 
     OptimizationAlgorithmGaussNewton* solver =
@@ -59,6 +61,12 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     
     // Enable verbose output for debugging
     optimizer_.setVerbose(true);
+
+    tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+
+    timer_ = this->create_wall_timer(
+      std::chrono::milliseconds(50),
+      std::bind(&GraphSLAM::broadcast_transform, this));
 }
 
 GraphSLAM::~GraphSLAM()
@@ -89,6 +97,38 @@ GraphSLAM::~GraphSLAM()
     this->optimizer_.save("optimized_graph.g2o");
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
+}
+
+void GraphSLAM::broadcast_transform()
+{
+    if (optimizer_.vertices().empty()) {
+        return; // No vertices in the graph, skip broadcasting
+    }
+
+    VertexSE2* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
+    if (!current_pose_vertex) {
+        RCLCPP_WARN(this->get_logger(), "Current pose vertex not found in the graph. Cannot broadcast transform.");
+        return;
+    }
+
+    SE2 pose_estimate = current_pose_vertex->estimate();
+    
+    geometry_msgs::msg::TransformStamped transformStamped;
+    transformStamped.header.stamp = this->get_clock()->now();
+    transformStamped.header.frame_id = "world";
+    transformStamped.child_frame_id = "base_footprint";
+    transformStamped.transform.translation.x = pose_estimate.translation()[0];
+    transformStamped.transform.translation.y = pose_estimate.translation()[1];
+    transformStamped.transform.translation.z = 0.0;
+
+    tf2::Quaternion q;
+    q.setRPY(0, 0, pose_estimate.rotation().angle());
+    transformStamped.transform.rotation.x = q.x();
+    transformStamped.transform.rotation.y = q.y();
+    transformStamped.transform.rotation.z = q.z();
+    transformStamped.transform.rotation.w = q.w();
+
+    tf_broadcaster_->sendTransform(transformStamped);
 }
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
@@ -197,6 +237,55 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     this->check_lap_completion();
     RCLCPP_INFO(this->get_logger(), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
 
+    const auto &verts_map = optimizer_.vertices();
+    visualization_msgs::msg::MarkerArray map_markers_;
+    for (const auto &kv : verts_map) {
+        auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
+        if (v_landmark) {
+            const Eigen::Vector2d &est = v_landmark->estimate();
+    
+            visualization_msgs::msg::Marker marker;
+            marker.header.stamp = this->get_clock()->now();
+            marker.header.frame_id = "world";
+            marker.ns = "graph_slam";
+            marker.id = v_landmark->id();
+            marker.type = visualization_msgs::msg::Marker::SPHERE;
+            marker.action = visualization_msgs::msg::Marker::ADD;
+            marker.lifetime = rclcpp::Duration(0, 500000000); // Marker will last for 0.5 seconds
+            marker.pose.position.x = est[0];
+            marker.pose.position.y = est[1];
+            marker.pose.position.z = 0.0;
+            marker.scale.x = 0.2; // Diameter of the sphere
+            marker.scale.y = 0.2;
+            marker.scale.z = 0.2;
+            marker.color.a = 1.0; // Fully opaque
+            // Set color based on cone class type
+            switch (v_landmark->color()) {
+                case 1: // Blue cone
+                    marker.color.r = 0.0f;
+                    marker.color.g = 0.0f;
+                    marker.color.b = 1.0f;
+                    break;
+                case 2: // Yellow cone
+                    marker.color.r = 1.0f;
+                    marker.color.g = 1.0f;
+                    marker.color.b = 0.0f;
+                    break;
+                case 3: // Orange cone
+                    marker.color.r = 1.0f;
+                    marker.color.g = 0.5f; // Orange is a mix of red and yellow
+                    marker.color.b = 0.0f;
+                    break;
+                default:
+                    // Default to white if unknown color type
+                    marker.color.r = 1.0f;
+                    marker.color.g = 1.0f;
+                    marker.color.b = 1.0f;
+            }
+            map_markers_.markers.push_back(marker);
+        }
+    }
+    map_publisher_->publish(map_markers_);
 }
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
@@ -238,7 +327,7 @@ void GraphSLAM::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr
 void GraphSLAM::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg)
 {
     if(!mission_set_){
-        this->current_mission_ = msg->data;
+        this->current_mission_.data = msg->data;
         mission_set_ = true;
         RCLCPP_INFO(this->get_logger(), "Mission set to %d", this->current_mission_.data);
     } else {

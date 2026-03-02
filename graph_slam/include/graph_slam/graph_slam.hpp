@@ -1,8 +1,8 @@
 #ifndef GRAPH_SLAM_H_
 #define GRAPH_SLAM_H_
 
-#include <rclcpp/rclcpp.hpp>
 #include "graph_slam/associationSolver.hpp"
+#include "graph_slam/types_graph_slam.h"
 
 #include "lart_common.h"
 #include "lart_msgs/msg/dynamics.hpp"
@@ -10,8 +10,14 @@
 #include "lart_msgs/msg/mission.hpp"
 #include "lart_msgs/msg/slam_stats.hpp"
 
+#include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/vector3_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <visualization_msgs/msg/marker_array.hpp>
+#include <visualization_msgs/msg/marker.hpp>
 
 #include <chrono>
 
@@ -23,7 +29,6 @@
 #include <g2o/types/slam2d/edge_se2.h>
 #include <g2o/types/slam2d/edge_se2_pointxy.h>
 
-#include "graph_slam/types_graph_slam.h"
 
 #define ASSOCIATION_MODE 0
 #define CONES_TOPIC "/mapping/cones"
@@ -50,6 +55,7 @@ private:
     
     //Publishers
     rclcpp::Publisher<lart_msgs::msg::SlamStats>::SharedPtr slam_stats_publisher_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr map_publisher_;
 
     g2o::SparseOptimizer optimizer_;
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
@@ -81,6 +87,10 @@ private:
     float lap_margin_ = 10.0;
     
     void check_lap_completion();
+
+    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+    rclcpp::TimerBase::SharedPtr timer_;
+    void broadcast_transform();
     
 protected:
     AssociationSolver *association_solver_;
