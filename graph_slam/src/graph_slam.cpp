@@ -28,12 +28,12 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
         bind(&GraphSLAM::imu_callback, this, _1));
 
     mission_subscriber_ = this->create_subscription<lart_msgs::msg::Mission>(
-        "/mission", 10,
+        MISSION_TOPIC, 10,
         bind(&GraphSLAM::mission_callback, this, _1));
 
-    slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>("/slam/stats", 10);
+    slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>(STATS_TOPIC, 10);
     
-    map_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/slam/map", 10);
+    map_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(MAP_MARKERS_TOPIC, 10);
     
     auto linearSolver = std::make_unique<SlamLinearSolver>();
 

@@ -34,6 +34,11 @@
 #define CONES_TOPIC "/mapping/cones"
 #define DYNAMICS_TOPIC "/acu_origin/dynamics"
 #define IMU_TOPIC "/imu/angular_velocity"
+#define MAP_MARKERS_TOPIC "/slam/map/markers"
+#define STATS_TOPIC "/slam/stats"
+#define MISSION_TOPIC "/mission"
+
+
 
 class GraphSLAM : public rclcpp::Node
 {
