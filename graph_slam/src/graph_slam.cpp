@@ -255,25 +255,30 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             marker.pose.position.x = est[0];
             marker.pose.position.y = est[1];
             marker.pose.position.z = 0.0;
-            marker.scale.x = 0.2; // Diameter of the sphere
-            marker.scale.y = 0.2;
-            marker.scale.z = 0.2;
-            marker.color.a = 1.0; // Fully opaque
+            marker.scale.x = 0.4; // Diameter of the sphere
+            marker.scale.y = 0.4;
+            marker.scale.z = 0.4;
+            marker.color.a = 0.5f;
             // Set color based on cone class type
             switch (v_landmark->color()) {
-                case 1: // Blue cone
-                    marker.color.r = 0.0f;
-                    marker.color.g = 0.0f;
-                    marker.color.b = 1.0f;
-                    break;
-                case 2: // Yellow cone
+                case lart_msgs::msg::Cone::YELLOW:
                     marker.color.r = 1.0f;
                     marker.color.g = 1.0f;
                     marker.color.b = 0.0f;
+                break;
+                case lart_msgs::msg::Cone::BLUE:
+                    marker.color.g = 0.0f;
+                    marker.color.r = 0.0f;
+                    marker.color.b = 1.0f;
                     break;
-                case 3: // Orange cone
+                case lart_msgs::msg::Cone::ORANGE_SMALL:
                     marker.color.r = 1.0f;
                     marker.color.g = 0.5f; // Orange is a mix of red and yellow
+                    marker.color.b = 0.0f;
+                    break;
+                case lart_msgs::msg::Cone::ORANGE_BIG:
+                    marker.color.r = 1.0f;
+                    marker.color.g = 0.2f; // Orange is a mix of red and yellow
                     marker.color.b = 0.0f;
                     break;
                 default:
@@ -296,7 +301,7 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     }
     frame_count_ ++;
     float current_rpm = (float)msg->rpm;
-    float ms_speed = TIRE_PERIMETER_M * (current_rpm / TRANSMISSION_RATIO / 60.0);
+    float ms_speed = RPM_TO_MS(current_rpm);
     this->velocity_ = ms_speed;
 
     tuple<double, double, double> deltas = this->compute_predicted_pose(this->velocity_, this->angular_velocity_); // Assuming velocity is 0 for prediction, can be replaced with actual velocity if available
