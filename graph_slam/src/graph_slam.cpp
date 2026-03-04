@@ -91,10 +91,13 @@ GraphSLAM::~GraphSLAM()
         RCLCPP_DEBUG(this->get_logger(), "Removed landmark vertex ID %d due to insufficient constraints.", vertex_id);
     }
 
-    this->optimizer_.initializeOptimization();
-    const int iterations = this->optimizer_.optimize(10);
-    RCLCPP_INFO(this->get_logger(), "Graph optimization finished (%d iterations).", iterations);
-    this->optimizer_.save("optimized_graph.g2o");
+    //Commented out for online use
+
+    // this->optimizer_.initializeOptimization();
+    // const int iterations = this->optimizer_.optimize(10);
+    // RCLCPP_INFO(this->get_logger(), "Graph optimization finished (%d iterations).", iterations);
+    // this->optimizer_.save("optimized_graph.g2o");
+
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
 }
@@ -143,6 +146,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     g2o::OptimizableGraph::Vertex* v_pose = optimizer_.vertex(current_pose_id);
     const auto &verts = optimizer_.vertices();
     if (v_pose){
+
         lart_msgs::msg::ConeArray map_cones_ = lart_msgs::msg::ConeArray();
         for (const auto &kv : verts) {
             auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
@@ -191,6 +195,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
                 landmark->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
                 landmark->setColor(msg->cones[i].class_type.data);
                 this->optimizer_.addVertex(landmark);
+                this->new_vertices.insert(landmark); // Add new landmark vertex for update bookeeping
     
                 landmark_id = landmark_id_counter_;
     
@@ -216,7 +221,11 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             edge->setInformation(information); // Use the computed information matrix
 
             this->optimizer_.addEdge(edge);
+            this->new_edges.insert(edge); // Add new edge for update bookkeeping
         }
+        // Update current pose estimate for next iteration
+        update_graph(this->new_vertices, this->new_edges);
+
     }else {
         RCLCPP_WARN(this->get_logger(), "Current pose vertex not found in the graph. Probably no pose initialized.");
     }
@@ -307,6 +316,7 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     new_pose_vertex->setId(++pose_id_counter_);
     new_pose_vertex->setEstimate(SE2(current_pose_[0], current_pose_[1], current_pose_[2]));
     optimizer_.addVertex(new_pose_vertex);
+    this->new_vertices.insert(new_pose_vertex); // Add new pose vertex for update bookkeeping
 
     EdgeSE2* odom_edge = new EdgeSE2();
     odom_edge->setVertex(0, current_pose_vertex);
@@ -314,6 +324,11 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     odom_edge->setMeasurement(SE2(get<0>(deltas), get<1>(deltas), get<2>(deltas)));
     odom_edge->setInformation(Eigen::Matrix3d::Identity()*120);
     optimizer_.addEdge(odom_edge);
+    this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
+    
+    //Update graph with new odom information
+    update_graph(this->new_vertices, this->new_edges);
+
     RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
 
 }
@@ -413,6 +428,29 @@ void GraphSLAM::check_lap_completion()
             // TODO: call full optimization after the first lap is completed
         }
     }
+}
+
+void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet vset, g2o::HyperGraph::EdgeSet eset){
+
+    if(eset.size() < 9){
+        return; // Not enough new information to warrant an update
+    }
+
+    if(!this->initialized_once){
+        this->optimizer_.initializeOptimization(0);
+        this->optimizer_.optimize(10); // TODO: tune the number of iterations for the initial optimization
+        this->initialized_once = true;
+        return; 
+    }
+
+    // Preform a partial update
+    this->optimizer_.updateInitialization(vset, eset);
+    this->optimizer_.optimize(5); // TODO: tune the number of iterations for
+
+    // Clear the sets after the update
+    this->new_vertices.clear();
+    this->new_edges.clear();
+
 }
 
 int main(int argc, char *argv[])
