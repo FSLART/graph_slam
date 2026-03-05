@@ -15,9 +15,10 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include "lart_msgs/msg/cone_array.hpp"
-#include "geometry_msgs/msg/pose_stamped.hpp"
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include "graph_slam/custom_types.hpp"
 
-#define ASSOCIATION_EUCLIDIAN_DISTANCE_THRESHOLD_SQUARED 1.2  // meters
+#define ASSOCIATION_EUCLIDIAN_DISTANCE_THRESHOLD_SQUARED 2.0  // in meters
 
 class AssociationSolver
 {
@@ -25,8 +26,8 @@ public:
     AssociationSolver(int mode);
     ~AssociationSolver();
 
-    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
-                               const lart_msgs::msg::ConeArray &map_cones,
+    std::pair<std::vector<int>, std::vector<graph_slam_types::Cone>> associate(const std::vector<graph_slam_types::Cone> &observations,
+                               const std::vector<graph_slam_types::Cone> &map_cones,
                                const Eigen::Vector3d &pose);
 
     class AssociationBackend;

@@ -1,6 +1,5 @@
 #include "graph_slam/associationSolver.hpp"
-
-namespace
+namespace 
 {
     // Simple 2D Euclidean distance between two geometry_msgs points
     inline double euclideanDistance2D(const geometry_msgs::msg::Point &a,
@@ -11,29 +10,28 @@ namespace
         return dx * dx + dy * dy;
     }
 
-    inline lart_msgs::msg::ConeArray obsToGlobal(const lart_msgs::msg::ConeArray &cone_array, const Eigen::Vector3d &pose)
+    inline std::vector<graph_slam_types::Cone> obsToGlobal(const std::vector<graph_slam_types::Cone> &cone_array, const Eigen::Vector3d &pose)
     {
-        lart_msgs::msg::ConeArray positions;
+        std::vector<graph_slam_types::Cone> positions;
         const double yaw = pose[2];
         const double cy = std::cos(yaw);
         const double sy = std::sin(yaw);
         const double car_x = pose[0];
         const double car_y = pose[1];
 
-        for (std::size_t i = 0; i < cone_array.cones.size(); ++i){
-            const auto &obs_cone_local = cone_array.cones[i];
+        for (std::size_t i = 0; i < cone_array.size(); ++i){
+            const auto &obs_cone_local = cone_array[i];
 
             // Transform to global coordinates (2D)
-            lart_msgs::msg::Cone obs_global;
-            const double x_l = obs_cone_local.position.x;
-            const double y_l = obs_cone_local.position.y;
+            graph_slam_types::Cone obs_global;
+            const double x_l = obs_cone_local.x;
+            const double y_l = obs_cone_local.y;
 
-            obs_global.position.x = car_x + cy * x_l - sy * y_l;
-            obs_global.position.y = car_y + sy * x_l + cy * y_l;
-            obs_global.position.z = 0.0;
-            obs_global.class_type = obs_cone_local.class_type;
+            obs_global.x = car_x + cy * x_l - sy * y_l;
+            obs_global.y = car_y + sy * x_l + cy * y_l;
+            obs_global.type = obs_cone_local.type;
 
-            positions.cones.push_back(obs_global);
+            positions.push_back(obs_global);
         }
 
         return positions;
@@ -48,8 +46,8 @@ public:
     virtual ~AssociationBackend() = default;
     // Returns a vector aligned with observations.cones:
     //  - element i is the index of the matched map cone, or -1 if no match
-    virtual std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
-                                       const lart_msgs::msg::ConeArray &map_cones,
+    virtual std::pair<std::vector<int>, std::vector<graph_slam_types::Cone>> associate(const std::vector<graph_slam_types::Cone> &observations,
+                                       const std::vector<graph_slam_types::Cone> &map_cones,
                                        const Eigen::Vector3d &pose) = 0;
 };
 
@@ -58,47 +56,52 @@ public:
 class NearestNeighborBackend : public AssociationSolver::AssociationBackend
 {
 public:
-    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
-                               const lart_msgs::msg::ConeArray &map_cones,
+    std::pair<std::vector<int>, std::vector<graph_slam_types::Cone>> associate(const std::vector<graph_slam_types::Cone> &observations,
+                               const std::vector<graph_slam_types::Cone> &map_cones,
                                const Eigen::Vector3d &pose) override
     {
 
-        lart_msgs::msg::ConeArray obs_global = obsToGlobal(observations, pose);
+        std::vector<graph_slam_types::Cone> obs_global = obsToGlobal(observations, pose);
         // If there is no map yet or no observations, everything is "new"
-        if (map_cones.cones.empty())
+        if (map_cones.empty())
         {
             RCLCPP_DEBUG(rclcpp::get_logger("association_solver"),
                          "Map is empty, all observations are unmatched.");
             
             // All observations are unmatched -> filled with -1
-            return {std::vector<int>(observations.cones.size(), -1), obs_global};
+            return {std::vector<int>(observations.size(), -1), obs_global};
         }
 
-        std::vector<int> matches(observations.cones.size(), -1);
+        std::vector<int> matches(observations.size(), -1);
 
         // For each observed cone (in local frame), find nearest cone in map (global)
-        for (std::size_t i = 0; i < obs_global.cones.size(); ++i)
+        for (std::size_t i = 0; i < obs_global.size(); ++i)
         {
             // Transform to global coordinates (2D)
-            geometry_msgs::msg::Point global_cone = obs_global.cones[i].position;
+            geometry_msgs::msg::Point global_cone;
+            global_cone.x = obs_global[i].x;
+            global_cone.y = obs_global[i].y;
 
             int best_index = -1;
             double best_dist = std::numeric_limits<double>::max();
 
-            for (std::size_t j = 0; j < map_cones.cones.size(); ++j)
+            for (std::size_t j = 0; j < map_cones.size(); ++j)
             {
-                if(obs_global.cones[i].class_type.data != map_cones.cones[j].class_type.data)
+                if(obs_global[i].type != map_cones[j].type)
                 {
                     // Skip cones of different color
                     continue;
                 }
-                const auto &map_cone = map_cones.cones[j];
-                const double d_squared = euclideanDistance2D(global_cone, map_cone.position);
+                geometry_msgs::msg::Point map_cone;
+                map_cone.x = map_cones[j].x;
+                map_cone.y = map_cones[j].y;
+
+                const double d_squared = euclideanDistance2D(global_cone, map_cone);
 
                 if (d_squared < best_dist)
                 {
                     best_dist = d_squared;
-                    best_index = static_cast<int>(map_cones.cones[j].cone_id.data);
+                    best_index = static_cast<int>(map_cones[j].id);
                 }
             }
             
@@ -131,18 +134,18 @@ public:
 class MahalanobisBackend : public AssociationSolver::AssociationBackend
 {
 public:
-    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
-                               const lart_msgs::msg::ConeArray &map_cones,
+    std::pair<std::vector<int>, std::vector<graph_slam_types::Cone>> associate(const std::vector<graph_slam_types::Cone> &observations,
+                               const std::vector<graph_slam_types::Cone> &map_cones,
                                const Eigen::Vector3d &pose) override
     {
 
-        lart_msgs::msg::ConeArray obs_global = obsToGlobal(observations, pose);
+        std::vector<graph_slam_types::Cone> obs_global = obsToGlobal(observations, pose);
         // TODO: implement Mahalanobis distance-based association
         // d^2 = (z - h(x))^T S^{-1} (z - h(x))
         (void)map_cones;
 
         // For now, treat all observations as unmatched
-        return {std::vector<int>(observations.cones.size(), -1), obs_global};
+        return {std::vector<int>(observations.size(), -1), obs_global};
     }
 };
 
@@ -151,25 +154,25 @@ public:
 class ICPBackend : public AssociationSolver::AssociationBackend
 {
 public:
-    std::pair<std::vector<int>, lart_msgs::msg::ConeArray> associate(const lart_msgs::msg::ConeArray &observations,
-                               const lart_msgs::msg::ConeArray &map_cones,
+    std::pair<std::vector<int>, std::vector<graph_slam_types::Cone>> associate(const std::vector<graph_slam_types::Cone> &observations,
+                               const std::vector<graph_slam_types::Cone> &map_cones,
                                const Eigen::Vector3d &pose) override
     {
-        lart_msgs::msg::ConeArray obs_global = obsToGlobal(observations, pose);
+        std::vector<graph_slam_types::Cone> obs_global = obsToGlobal(observations, pose);
         
-        if (map_cones.cones.empty()) {
-            return {std::vector<int>(observations.cones.size(), -1), obs_global};
+        if (map_cones.empty()) {
+            return {std::vector<int>(observations.size(), -1), obs_global};
         }
 
         // 1. Convert ROS messages to PCL Clouds
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_obs(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_map(new pcl::PointCloud<pcl::PointXYZ>);
 
-        for (const auto& cone : obs_global.cones)
-            cloud_obs->push_back(pcl::PointXYZ(cone.position.x, cone.position.y, 0));
+        for (const auto& cone : obs_global)
+            cloud_obs->push_back(pcl::PointXYZ(cone.x, cone.y, 0));
 
-        for (const auto& cone : map_cones.cones)
-            cloud_map->push_back(pcl::PointXYZ(cone.position.x, cone.position.y, 0));
+        for (const auto& cone : map_cones)
+            cloud_map->push_back(pcl::PointXYZ(cone.x, cone.y, 0));
 
         // 2. Setup and Run ICP
         pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
@@ -184,7 +187,7 @@ public:
         pcl::PointCloud<pcl::PointXYZ> aligned_obs;
         icp.align(aligned_obs);
 
-        std::vector<int> matches(observations.cones.size(), -1);
+        std::vector<int> matches(observations.size(), -1);
 
         if (icp.hasConverged()) {
             // 3. Match based on ALIGNED positions
@@ -192,18 +195,18 @@ public:
                 int best_index = -1;
                 double best_dist_sq = std::numeric_limits<double>::max();
 
-                for (size_t j = 0; j < map_cones.cones.size(); ++j) {
+                for (size_t j = 0; j < map_cones.size(); ++j) {
                     // Still respect color classes
-                    if(obs_global.cones[i].class_type.data != map_cones.cones[j].class_type.data)
+                    if(obs_global[i].type != map_cones[j].type)
                         continue;
 
-                    double dx = aligned_obs[i].x - map_cones.cones[j].position.x;
-                    double dy = aligned_obs[i].y - map_cones.cones[j].position.y;
+                    double dx = aligned_obs[i].x - map_cones[j].x;
+                    double dy = aligned_obs[i].y - map_cones[j].y;
                     double d_sq = dx*dx + dy*dy;
 
                     if (d_sq < best_dist_sq) {
                         best_dist_sq = d_sq;
-                        best_index = static_cast<int>(map_cones.cones[j].cone_id.data);
+                        best_index = static_cast<int>(map_cones[j].type);
                     }
                 }
 
@@ -240,12 +243,12 @@ AssociationSolver::AssociationSolver(int mode)
 
 AssociationSolver::~AssociationSolver() = default;
 
-std::pair<std::vector<int>, lart_msgs::msg::ConeArray> AssociationSolver::associate(const lart_msgs::msg::ConeArray &observations,
-                                              const lart_msgs::msg::ConeArray &map_cones,
+std::pair<std::vector<int>, std::vector<graph_slam_types::Cone>> AssociationSolver::associate(const std::vector<graph_slam_types::Cone> &observations,
+                                              const std::vector<graph_slam_types::Cone> &map_cones,
                                               const Eigen::Vector3d &pose)
 {
     if (backend_)
         return backend_->associate(observations, map_cones, pose);
 
-    return std::pair<std::vector<int>, lart_msgs::msg::ConeArray>{};
+    return std::pair<std::vector<int>, std::vector<graph_slam_types::Cone>>{};
 }

@@ -3,6 +3,7 @@
 
 #include "graph_slam/associationSolver.hpp"
 #include "graph_slam/types_graph_slam.h"
+#include "graph_slam/custom_types.hpp"
 
 #include "lart_common.h"
 #include "lart_msgs/msg/dynamics.hpp"
@@ -62,6 +63,13 @@ private:
     rclcpp::Publisher<lart_msgs::msg::SlamStats>::SharedPtr slam_stats_publisher_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr map_publisher_;
 
+    typedef struct{
+        int id;
+        float x;
+        float y;
+        int type;
+    } cone;
+
     g2o::SparseOptimizer optimizer_;
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
     using SlamLinearSolver = g2o::LinearSolverEigen<SlamBlockSolver::PoseMatrixType>;
@@ -72,17 +80,19 @@ private:
     std::chrono::steady_clock::time_point last_predict_time_{};
     Eigen::Vector3d current_pose_{0.0, 0.0, 0.0}; // x, y, theta
 
+    // Information matrix parameters
     const double base_depth_uncertainty_ = 0.1; // Base longitudinal uncertainty in meters
     const double base_lateral_uncertainty_ = 0.05; // Base lateral
     const double k_depth = 0.0012;  //longitudinal uncertainty
     const double k_lateral = 0.04; //lateral uncertainty
     const double depth_weight = 1.5; //exponential weight for depth uncertainty
 
-    // Stats variavbles
+    // Stats variables
     long frame_count_ = 0;
     long observation_count_ = 0;
     double time_sum_ = 0.0;
 
+    //Lap logic variables
     lart_msgs::msg::Mission current_mission_;
     bool mission_set_ = false;
     int16_t current_lap_ = -1;
@@ -90,12 +100,15 @@ private:
     float lap_margin_x_ = 1.0;
     float lap_margin_y_ = 3.0;
     float lap_margin_ = 10.0;
-    
     void check_lap_completion();
+
+    bool localization_mode_ = false;
+    
 
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
     void broadcast_transform();
+    void publish_map();
     
 protected:
     AssociationSolver *association_solver_;

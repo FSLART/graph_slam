@@ -129,6 +129,7 @@ void GraphSLAM::broadcast_transform()
     transformStamped.transform.rotation.w = q.w();
 
     tf_broadcaster_->sendTransform(transformStamped);
+    this->publish_map();
 }
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
@@ -143,7 +144,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     g2o::OptimizableGraph::Vertex* v_pose = optimizer_.vertex(current_pose_id);
     const auto &verts = optimizer_.vertices();
     if (v_pose){
-        lart_msgs::msg::ConeArray map_cones_ = lart_msgs::msg::ConeArray();
+        std::vector<graph_slam_types::Cone> map_cones_;
         for (const auto &kv : verts) {
             auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
             if (!v_landmark) {
@@ -156,24 +157,32 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
                 continue; // Skip landmarks that are too far away, likely outliers
             }
     
-            lart_msgs::msg::Cone cone;
-            cone.position.x = est[0];
-            cone.position.y = est[1];
-            cone.position.z = 0.0;
-            cone.class_type.data = v_landmark->color();
-            cone.cone_id.data = v_landmark->id();
-            map_cones_.cones.push_back(cone);
+            graph_slam_types::Cone cone;
+            cone.x = est[0];
+            cone.y = est[1];
+            cone.type = v_landmark->color();
+            cone.id = v_landmark->id();
+            map_cones_.push_back(cone);
+        }
+
+        std::vector<graph_slam_types::Cone> observations;
+        for (const auto& cone_msg : msg->cones) {
+            graph_slam_types::Cone cone;
+            cone.x = cone_msg.position.x;
+            cone.y = cone_msg.position.y;
+            cone.type = cone_msg.class_type.data;
+            observations.push_back(cone);
         }
         
-        pair<vector<int>, lart_msgs::msg::ConeArray> association_result = association_solver_->associate(*msg, map_cones_, robot_pose_);
+        pair<vector<int>, std::vector<graph_slam_types::Cone>> association_result = association_solver_->associate(observations, map_cones_, robot_pose_);
         
         const auto matches = association_result.first;
         const auto obs_global = association_result.second;
     
-        for (size_t i = 0; i < msg->cones.size(); ++i){
+        for (size_t i = 0; i < observations.size(); ++i){
             long landmark_id = -1;
-            double x = msg->cones[i].position.x;
-            double y = msg->cones[i].position.y;
+            double x = observations[i].x;
+            double y = observations[i].y;
             double d = std::sqrt(x*x + y*y);
 
             if (d > 10 )
@@ -182,14 +191,14 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             if (matches[i] != -1){
                 landmark_id= matches[i];
     
-                dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
+                dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global[i].x, obs_global[i].y));
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
             } else {
                 
                 VertexLandmark2D* landmark = new VertexLandmark2D();
                 landmark->setId(++landmark_id_counter_);
-                landmark->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
-                landmark->setColor(msg->cones[i].class_type.data);
+                landmark->setEstimate(Eigen::Vector2d(obs_global[i].x, obs_global[i].y));
+                landmark->setColor(observations[i].type);
                 this->optimizer_.addVertex(landmark);
     
                 landmark_id = landmark_id_counter_;
@@ -210,7 +219,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             EdgeSE2PointXY* edge = new EdgeSE2PointXY();
             edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
             edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id)));
-            edge->setMeasurement(Eigen::Vector2d(msg->cones[i].position.x, msg->cones[i].position.y));
+            edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
 
             // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
             edge->setInformation(information); // Use the computed information matrix
@@ -236,61 +245,6 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     // RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %.3f ms.", duration_ms);
     this->check_lap_completion();
     RCLCPP_INFO(this->get_logger(), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
-
-    const auto &verts_map = optimizer_.vertices();
-    visualization_msgs::msg::MarkerArray map_markers_;
-    for (const auto &kv : verts_map) {
-        auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
-        if (v_landmark) {
-            const Eigen::Vector2d &est = v_landmark->estimate();
-    
-            visualization_msgs::msg::Marker marker;
-            marker.header.stamp = this->get_clock()->now();
-            marker.header.frame_id = "world";
-            marker.ns = "graph_slam";
-            marker.id = v_landmark->id();
-            marker.type = visualization_msgs::msg::Marker::SPHERE;
-            marker.action = visualization_msgs::msg::Marker::ADD;
-            marker.lifetime = rclcpp::Duration(0, 500000000); // Marker will last for 0.5 seconds
-            marker.pose.position.x = est[0];
-            marker.pose.position.y = est[1];
-            marker.pose.position.z = 0.0;
-            marker.scale.x = 0.4; // Diameter of the sphere
-            marker.scale.y = 0.4;
-            marker.scale.z = 0.4;
-            marker.color.a = 0.5f;
-            // Set color based on cone class type
-            switch (v_landmark->color()) {
-                case lart_msgs::msg::Cone::YELLOW:
-                    marker.color.r = 1.0f;
-                    marker.color.g = 1.0f;
-                    marker.color.b = 0.0f;
-                break;
-                case lart_msgs::msg::Cone::BLUE:
-                    marker.color.g = 0.0f;
-                    marker.color.r = 0.0f;
-                    marker.color.b = 1.0f;
-                    break;
-                case lart_msgs::msg::Cone::ORANGE_SMALL:
-                    marker.color.r = 1.0f;
-                    marker.color.g = 0.5f; // Orange is a mix of red and yellow
-                    marker.color.b = 0.0f;
-                    break;
-                case lart_msgs::msg::Cone::ORANGE_BIG:
-                    marker.color.r = 1.0f;
-                    marker.color.g = 0.2f; // Orange is a mix of red and yellow
-                    marker.color.b = 0.0f;
-                    break;
-                default:
-                    // Default to white if unknown color type
-                    marker.color.r = 1.0f;
-                    marker.color.g = 1.0f;
-                    marker.color.b = 1.0f;
-            }
-            map_markers_.markers.push_back(marker);
-        }
-    }
-    map_publisher_->publish(map_markers_);
 }
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
@@ -385,9 +339,12 @@ void GraphSLAM::check_lap_completion()
         return; // you ain't got no motion
     }
 
+    if (this->current_lap_distance_ == 1){
+        this->localization_mode_ = true;
+    }
+
     float x = current_pose_[0];
     float y = current_pose_[1];
-    float theta = current_pose_[2];
 
     bool lap_completed = false;
 
@@ -418,6 +375,67 @@ void GraphSLAM::check_lap_completion()
             // TODO: call full optimization after the first lap is completed
         }
     }
+}
+
+void GraphSLAM::publish_map()
+{
+    const auto &verts_map = optimizer_.vertices();
+    visualization_msgs::msg::MarkerArray map_markers_;
+    for (const auto &kv : verts_map) {
+        auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
+        if (v_landmark) {
+            const Eigen::Vector2d &est = v_landmark->estimate();
+            auto* e = static_cast<g2o::EdgeSE2PointXY*>(*v_landmark->edges().begin());
+            const Eigen::MatrixXd &info = e->information();
+            Eigen::Matrix2d cov = info.inverse();
+    
+            visualization_msgs::msg::Marker marker;
+            marker.header.stamp = this->get_clock()->now();
+            marker.header.frame_id = "world";
+            marker.ns = "graph_slam";
+            marker.id = v_landmark->id();
+            marker.type = visualization_msgs::msg::Marker::SPHERE;
+            marker.action = visualization_msgs::msg::Marker::ADD;
+            marker.lifetime = rclcpp::Duration(0, 500000000); // Marker will last for 0.5 seconds
+            marker.pose.position.x = est[0];
+            marker.pose.position.y = est[1];
+            marker.pose.position.z = 0.0;
+            marker.scale.x = std::sqrt(cov(0, 0)) * 2.0; 
+            marker.scale.y = std::sqrt(cov(1, 1)) * 2.0;
+            marker.scale.z = 0.4;
+            marker.color.a = 0.5f;
+            // Set color based on cone class type
+            switch (v_landmark->color()) {
+                case lart_msgs::msg::Cone::YELLOW:
+                    marker.color.r = 1.0f;
+                    marker.color.g = 1.0f;
+                    marker.color.b = 0.0f;
+                break;
+                case lart_msgs::msg::Cone::BLUE:
+                    marker.color.g = 0.0f;
+                    marker.color.r = 0.0f;
+                    marker.color.b = 1.0f;
+                    break;
+                case lart_msgs::msg::Cone::ORANGE_SMALL:
+                    marker.color.r = 1.0f;
+                    marker.color.g = 0.5f; // Orange is a mix of red and yellow
+                    marker.color.b = 0.0f;
+                    break;
+                case lart_msgs::msg::Cone::ORANGE_BIG:
+                    marker.color.r = 1.0f;
+                    marker.color.g = 0.2f; // Orange is a mix of red and yellow
+                    marker.color.b = 0.0f;
+                    break;
+                default:
+                    // Default to white if unknown color type
+                    marker.color.r = 1.0f;
+                    marker.color.g = 1.0f;
+                    marker.color.b = 1.0f;
+            }
+            map_markers_.markers.push_back(marker);
+        }
+    }
+    map_publisher_->publish(map_markers_);
 }
 
 int main(int argc, char *argv[])
