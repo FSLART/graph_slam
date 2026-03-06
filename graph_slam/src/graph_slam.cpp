@@ -185,7 +185,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
             if (matches[i] != -1){
                 landmark_id= matches[i];
-    
+                
                 dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
             } else {
@@ -208,8 +208,18 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
             double sigma_y = k_lateral * d + base_lateral_uncertainty_;
     
-            information(0, 0) = (1.0 / (sigma_x * sigma_x))/2; // Inverse of sigma_x^2
-            information(1, 1) = (1.0 / (sigma_y * sigma_y))/2; // Inverse of sigma_y^2
+            // information(0, 0) = (1.0 / (sigma_x * sigma_x))/2; // Inverse of sigma_x^2
+            // information(1, 1) = (1.0 / (sigma_y * sigma_y))/2; // Inverse of sigma_y^2
+
+            //Testing if this works
+            double info_x = 1.0 / (sigma_x * sigma_x);
+            double info_y = 1.0 / (sigma_y * sigma_y);
+
+            info_x = std::max(info_x, 1e-6);
+            info_y = std::max(info_y, 1e-6);
+
+            information(0,0) = info_x;
+            information(1,1) = info_y;
     
     
             EdgeSE2PointXY* edge = new EdgeSE2PointXY();
@@ -220,11 +230,14 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
             edge->setInformation(information); // Use the computed information matrix
 
+            // Add robust kernel here
+            auto rk = new RobustKernelHuber();
+            rk->setDelta(0.5);
+            edge->setRobustKernel(rk);
+
             this->optimizer_.addEdge(edge);
             this->new_edges.insert(edge); // Add new edge for update bookkeeping
         }
-        // Update current pose estimate for next iteration
-        update_graph(this->new_vertices, this->new_edges);
 
     }else {
         RCLCPP_WARN(this->get_logger(), "Current pose vertex not found in the graph. Probably no pose initialized.");
@@ -294,6 +307,8 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             map_markers_.markers.push_back(marker);
         }
     }
+    // Update current pose estimate for next iteration
+    update_graph(this->new_vertices, this->new_edges);
     map_publisher_->publish(map_markers_);
 }
 
@@ -398,6 +413,7 @@ void GraphSLAM::check_lap_completion()
     float x = current_pose_[0];
     float y = current_pose_[1];
     float theta = current_pose_[2];
+    (void) theta;
 
     bool lap_completed = false;
 
@@ -432,20 +448,28 @@ void GraphSLAM::check_lap_completion()
 
 void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet vset, g2o::HyperGraph::EdgeSet eset){
 
-    if(eset.size() < 9){
+    //RCLCPP_INFO(this->get_logger(), "Only %zu new edges and %zu new vertices since last update. Skipping graph update.", eset.size(), vset.size());
+
+    if(eset.size() < 20){
         return; // Not enough new information to warrant an update
     }
 
     if(!this->initialized_once){
-        this->optimizer_.initializeOptimization(0);
+        RCLCPP_INFO(this->get_logger(), "Performing initial graph optimization with %zu vertices and %zu edges.", optimizer_.vertices().size(), optimizer_.edges().size());
+        this->optimizer_.initializeOptimization();
         this->optimizer_.optimize(10); // TODO: tune the number of iterations for the initial optimization
         this->initialized_once = true;
+
+        this->new_vertices.clear();
+        this->new_edges.clear();
         return; 
     }
 
     // Preform a partial update
     this->optimizer_.updateInitialization(vset, eset);
-    this->optimizer_.optimize(5); // TODO: tune the number of iterations for
+    this->optimizer_.optimize(20,true); // TODO: tune the number of iterations for the partial optimization
+
+    RCLCPP_INFO(this->get_logger(), "Graph updated with %zu new edges and %zu new vertices. Current graph size: %zu vertices, %zu edges.", eset.size(), vset.size(), optimizer_.vertices().size(), optimizer_.edges().size());
 
     // Clear the sets after the update
     this->new_vertices.clear();

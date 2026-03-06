@@ -28,6 +28,7 @@
 #include <g2o/solvers/eigen/linear_solver_eigen.h>
 #include <g2o/types/slam2d/edge_se2.h>
 #include <g2o/types/slam2d/edge_se2_pointxy.h>
+#include <g2o/core/robust_kernel_impl.h>
 
 
 #define ASSOCIATION_MODE 0
@@ -73,7 +74,7 @@ private:
     g2o::HyperGraph::EdgeSet   new_edges;
 
     const double base_depth_uncertainty_ = 0.1; // Base longitudinal uncertainty in meters
-    const double base_lateral_uncertainty_ = 0.05; // Base lateral
+    const double base_lateral_uncertainty_ = 0.05; // Base lateral uncertainty in meters
     const double k_depth = 0.0012;  //longitudinal uncertainty
     const double k_lateral = 0.04; //lateral uncertainty
     const double depth_weight = 1.5; //exponential weight for depth uncertainty

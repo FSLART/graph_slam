@@ -30,7 +30,6 @@ show_odmetry_edges = True
 # Lists of (from_id, to_id) for different edge types
 odom_edges = []
 landmark_edges = []
-
 # Map from landmark id -> (x, y) (used for drawing observation edges)
 landmarks = {}
 
@@ -39,7 +38,7 @@ yellow_landmarks = {}
 orange_landmarks = {}
 big_orange_landmarks = {}
 
-with open("/home/andre-lopes/Desktop/ros2_ws/g2o_files/autoz_fsg_acceptable_result/final_graph.g2o", "r") as f:
+with open("/home/tomas/data/ros2_ws/final_graph.g2o", "r") as f:
     for line in f:
         parts = line.split()
         if not parts:
