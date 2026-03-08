@@ -262,7 +262,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     time_sum_ += duration_ms;
     // RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %.3f ms.", duration_ms);
     this->check_lap_completion();
-    RCLCPP_INFO(this->get_logger(), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
+    //RCLCPP_INFO(this->get_logger(), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
 
     const auto &verts_map = optimizer_.vertices();
     visualization_msgs::msg::MarkerArray map_markers_;
@@ -451,37 +451,54 @@ void GraphSLAM::check_lap_completion()
     }
 }
 
-void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet vset, g2o::HyperGraph::EdgeSet eset){
+void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset){
 
     //RCLCPP_INFO(this->get_logger(), "Only %zu new edges and %zu new vertices since last update. Skipping graph update.", eset.size(), vset.size());
-
-    // if(eset.size() < 20){
-    //     return; // Not enough new information to warrant an update
-    // }
 
     if(!this->initialized_once){
         RCLCPP_INFO(this->get_logger(), "Performing initial graph optimization with %zu vertices and %zu edges.", optimizer_.vertices().size(), optimizer_.edges().size());
         this->optimizer_.initializeOptimization();
         this->optimizer_.optimize(10); // TODO: tune the number of iterations for the initial optimization
         this->initialized_once = true;
+        this->new_vertices.clear();
+        this->new_edges.clear();
         return;
     }
 
+    if(eset.size() < 20){
+        return; // Not enough new information to warrant an update
+    }
 
-    if (optimizer_.edges().size() % 100 != 0)
-        return; // Only update every 100 edges to reduce computational load
+    optimizer_.updateInitialization(vset, eset);
 
-
-    // Preform a partial update
-    //this->optimizer_.updateInitialization(vset, eset);
-
-    optimizer_.initializeOptimization();
-
-    double chi_before = optimizer_.chi2();//1
-    optimizer_.optimize(10);
-    double chi_after = optimizer_.chi2();//2
+    double chi_before = optimizer_.activeChi2();
+    optimizer_.optimize(5, true);
+    double chi_after = optimizer_.activeChi2();
 
     RCLCPP_INFO(this->get_logger(),"chi2 before %.4f after %.4f",chi_before, chi_after);
+
+    double chi = 0;
+
+    for (auto *edge_base : optimizer_.edges())
+    {
+        auto *edge = dynamic_cast<g2o::OptimizableGraph::Edge *>(edge_base);
+        if (!edge) {
+            continue;
+        }
+
+        edge->computeError();
+        const double edge_chi2 = edge->chi2();
+
+        if (!std::isfinite(edge_chi2))
+        {
+            RCLCPP_ERROR(this->get_logger(), "Edge produced invalid chi2!");
+        }
+
+        chi += edge_chi2;
+    }
+
+    RCLCPP_INFO(this->get_logger(), "manual chi2 = %f", chi);
+
 
     // Clear the sets after the update
     this->new_vertices.clear();

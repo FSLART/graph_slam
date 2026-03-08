@@ -48,7 +48,7 @@ public:
     void imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
     void mission_callback(const lart_msgs::msg::Mission::SharedPtr msg);
     std::tuple<double, double, double> compute_predicted_pose(float velocity, float omega_z);
-    void update_graph(g2o::HyperGraph::VertexSet vset, g2o::HyperGraph::EdgeSet eset);
+    void update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset);
 private:
     //Subscriptions
     rclcpp::Subscription<lart_msgs::msg::ConeArray>::SharedPtr observations_subscriber_;
