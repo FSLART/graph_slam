@@ -8,7 +8,9 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 {
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been started.");
 
-    this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
+    //this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
+    this->current_mission_.data = 6;
+    this->mission_set_ = true;
 
     association_solver_ = new AssociationSolver(ASSOCIATION_MODE);
 
@@ -37,9 +39,12 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     
     auto linearSolver = std::make_unique<SlamLinearSolver>();
 
-    OptimizationAlgorithmGaussNewton* solver =
-      new OptimizationAlgorithmGaussNewton(
-          std::make_unique<SlamBlockSolver>(move(linearSolver)));
+    // OptimizationAlgorithmGaussNewton* solver =
+    //   new OptimizationAlgorithmGaussNewton(
+    //       std::make_unique<SlamBlockSolver>(move(linearSolver)));
+
+    auto solver = new OptimizationAlgorithmLevenberg(
+    std::make_unique<SlamBlockSolver>(std::move(linearSolver)));
     
     optimizer_.setAlgorithm(solver);
 
@@ -186,7 +191,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             if (matches[i] != -1){
                 landmark_id= matches[i];
                 
-                dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
+                //dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
             } else {
                 
@@ -450,26 +455,33 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet vset, g2o::HyperGraph::E
 
     //RCLCPP_INFO(this->get_logger(), "Only %zu new edges and %zu new vertices since last update. Skipping graph update.", eset.size(), vset.size());
 
-    if(eset.size() < 20){
-        return; // Not enough new information to warrant an update
-    }
+    // if(eset.size() < 20){
+    //     return; // Not enough new information to warrant an update
+    // }
 
     if(!this->initialized_once){
         RCLCPP_INFO(this->get_logger(), "Performing initial graph optimization with %zu vertices and %zu edges.", optimizer_.vertices().size(), optimizer_.edges().size());
         this->optimizer_.initializeOptimization();
         this->optimizer_.optimize(10); // TODO: tune the number of iterations for the initial optimization
         this->initialized_once = true;
-
-        this->new_vertices.clear();
-        this->new_edges.clear();
-        return; 
+        return;
     }
 
-    // Preform a partial update
-    this->optimizer_.updateInitialization(vset, eset);
-    this->optimizer_.optimize(20,true); // TODO: tune the number of iterations for the partial optimization
 
-    RCLCPP_INFO(this->get_logger(), "Graph updated with %zu new edges and %zu new vertices. Current graph size: %zu vertices, %zu edges.", eset.size(), vset.size(), optimizer_.vertices().size(), optimizer_.edges().size());
+    if (optimizer_.edges().size() % 100 != 0)
+        return; // Only update every 100 edges to reduce computational load
+
+
+    // Preform a partial update
+    //this->optimizer_.updateInitialization(vset, eset);
+
+    optimizer_.initializeOptimization();
+
+    double chi_before = optimizer_.chi2();//1
+    optimizer_.optimize(10);
+    double chi_after = optimizer_.chi2();//2
+
+    RCLCPP_INFO(this->get_logger(),"chi2 before %.4f after %.4f",chi_before, chi_after);
 
     // Clear the sets after the update
     this->new_vertices.clear();
