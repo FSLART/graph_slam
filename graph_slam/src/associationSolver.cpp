@@ -252,3 +252,51 @@ std::pair<std::vector<int>, std::vector<graph_slam_types::Cone>> AssociationSolv
 
     return std::pair<std::vector<int>, std::vector<graph_slam_types::Cone>>{};
 }
+
+Eigen::Matrix2d AssociationSolver::get_info_matrix(double x, double y)
+{
+    // 1. Clamp input to grid bounds
+        x = std::clamp(x, x_grid.front(), x_grid.back());
+        y = std::clamp(y, y_grid.front(), y_grid.back());
+
+        // 2. Find neighboring indices
+        auto it_x = std::lower_bound(x_grid.begin(), x_grid.end(), x);
+        int x1_idx = std::distance(x_grid.begin(), it_x) - (it_x == x_grid.begin() ? 0 : 1);
+        int x2_idx = std::min(x1_idx + 1, (int)x_grid.size() - 1);
+
+        auto it_y = std::lower_bound(y_grid.begin(), y_grid.end(), y);
+        int y1_idx = std::distance(y_grid.begin(), it_y) - (it_y == y_grid.begin() ? 0 : 1);
+        int y2_idx = std::min(y1_idx + 1, (int)y_grid.size() - 1);
+
+        double x1 = x_grid[x1_idx], x2 = x_grid[x2_idx];
+        double y1 = y_grid[y1_idx], y2 = y_grid[y2_idx];
+
+        // 3. Perform Bilinear Interpolation for dx and dy separately
+        auto get_err = [&](int xi, int yi) { return table[{x_grid[xi], y_grid[yi]}]; };
+    
+        double dx = interpolate(x, y, x1, x2, y1, y2, 
+                               get_err(x1_idx, y1_idx).first, get_err(x2_idx, y1_idx).first,
+                               get_err(x1_idx, y2_idx).first, get_err(x2_idx, y2_idx).first);
+
+        double dy = interpolate(x, y, x1, x2, y1, y2, 
+                               get_err(x1_idx, y1_idx).second, get_err(x2_idx, y1_idx).second,
+                               get_err(x1_idx, y2_idx).second, get_err(x2_idx, y2_idx).second);
+
+        // 4. Construct Information Matrix (1/variance)
+        Eigen::Matrix2d info = Eigen::Matrix2d::Zero();
+        info(0, 0) = 1.0 / std::max(1e-4, dx * dx);
+        info(1, 1) = 1.0 / std::max(1e-4, dy * dy);
+
+        return info;
+}
+
+double AssociationSolver::interpolate(double x, double y, double x1, double x2, double y1, double y2, double q11, double q21, double q12, double q22){
+    if (x1 == x2 && y1 == y2) return q11;
+    if (x1 == x2) return q11 + (q12 - q11) * (y - y1) / (y2 - y1);
+    if (y1 == y2) return q11 + (q21 - q11) * (x - x1) / (x2 - x1);
+
+    double r1 = ((x2 - x) / (x2 - x1)) * q11 + ((x - x1) / (x2 - x1)) * q21;
+    double r2 = ((x2 - x) / (x2 - x1)) * q12 + ((x - x1) / (x2 - x1)) * q22;
+    return ((y2 - y) / (y2 - y1)) * r1 + ((y - y1) / (y2 - y1)) * r2;
+
+}

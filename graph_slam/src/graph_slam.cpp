@@ -65,7 +65,7 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
     timer_ = this->create_wall_timer(
-      std::chrono::milliseconds(50),
+      std::chrono::milliseconds(10),
       std::bind(&GraphSLAM::broadcast_transform, this));
 }
 
@@ -143,8 +143,9 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     const auto robot_pose_ =this->current_pose_;
     g2o::OptimizableGraph::Vertex* v_pose = optimizer_.vertex(current_pose_id);
     const auto &verts = optimizer_.vertices();
+    std::vector<graph_slam_types::Cone> map_cones_;
+    std::vector<graph_slam_types::Cone> observations;
     if (v_pose){
-        std::vector<graph_slam_types::Cone> map_cones_;
         for (const auto &kv : verts) {
             auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
             if (!v_landmark) {
@@ -156,16 +157,36 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             if (d > 15) {
                 continue; // Skip landmarks that are too far away, likely outliers
             }
+
+            g2o::EdgeSE2PointXY* most_recent_edge = nullptr;
+            int max_pose_id = -1;
+
+            for (auto* edge_base : v_landmark->edges()) {
+                // 1. Safely check the type
+                auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);
+                if (!e_se2xy) continue;
+
+                // 2. The robot pose is usually vertex(0) in an EdgeSE2PointXY
+                int current_pose_id = e_se2xy->vertex(0)->id();
+
+                // 3. Keep the one with the highest ID (most recent in time)
+                if (current_pose_id > max_pose_id) {
+                    max_pose_id = current_pose_id;
+                    most_recent_edge = e_se2xy;
+                }
+            }
+
+            const Eigen::Matrix2d &info = most_recent_edge->information();
     
             graph_slam_types::Cone cone;
             cone.x = est[0];
             cone.y = est[1];
             cone.type = v_landmark->color();
             cone.id = v_landmark->id();
+            cone.information = info;
             map_cones_.push_back(cone);
         }
 
-        std::vector<graph_slam_types::Cone> observations;
         for (const auto& cone_msg : msg->cones) {
             graph_slam_types::Cone cone;
             cone.x = cone_msg.position.x;
@@ -173,7 +194,11 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             cone.type = cone_msg.class_type.data;
             observations.push_back(cone);
         }
-        
+        // if (localization_mode_) {
+        //     localize_in_map(observations, map_cones_);
+        //     return;
+        // }
+
         pair<vector<int>, std::vector<graph_slam_types::Cone>> association_result = association_solver_->associate(observations, map_cones_, robot_pose_);
         
         const auto matches = association_result.first;
@@ -194,7 +219,6 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
                 dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global[i].x, obs_global[i].y));
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
             } else {
-                
                 VertexLandmark2D* landmark = new VertexLandmark2D();
                 landmark->setId(++landmark_id_counter_);
                 landmark->setEstimate(Eigen::Vector2d(obs_global[i].x, obs_global[i].y));
@@ -206,14 +230,14 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu is a new cone.", i);
             }
     
-            Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
+            // Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
     
     
-            double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
-            double sigma_y = k_lateral * d + base_lateral_uncertainty_;
+            // double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
+            // double sigma_y = k_lateral * d + base_lateral_uncertainty_;
     
-            information(0, 0) = (1.0 / (sigma_x * sigma_x))/2; // Inverse of sigma_x^2
-            information(1, 1) = (1.0 / (sigma_y * sigma_y))/2; // Inverse of sigma_y^2
+            // information(0, 0) = (1.0 / (sigma_x * sigma_x))/2; // Inverse of sigma_x^2
+            // information(1, 1) = (1.0 / (sigma_y * sigma_y))/2; // Inverse of sigma_y^2
     
     
             EdgeSE2PointXY* edge = new EdgeSE2PointXY();
@@ -222,7 +246,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
 
             // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
-            edge->setInformation(information); // Use the computed information matrix
+            edge->setInformation(association_solver_->get_info_matrix(x, y)); // Use the computed information matrix
 
             this->optimizer_.addEdge(edge);
         }
@@ -245,6 +269,11 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     // RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %.3f ms.", duration_ms);
     this->check_lap_completion();
     RCLCPP_INFO(this->get_logger(), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
+    lart_msgs::msg::SlamStats stats_msg;
+    stats_msg.cones_count_all = map_cones_.size();
+    stats_msg.cones_count_current = observations.size();
+    stats_msg.lap_count = this->current_lap_;
+    this->slam_stats_publisher_->publish(stats_msg);
 }
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
@@ -271,7 +300,7 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     odom_edge->setVertex(0, current_pose_vertex);
     odom_edge->setVertex(1, new_pose_vertex);
     odom_edge->setMeasurement(SE2(get<0>(deltas), get<1>(deltas), get<2>(deltas)));
-    odom_edge->setInformation(Eigen::Matrix3d::Identity()*120);
+    odom_edge->setInformation(Eigen::Matrix3d::Identity()*80);
     optimizer_.addEdge(odom_edge);
     RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
 
@@ -348,7 +377,7 @@ void GraphSLAM::check_lap_completion()
 
     bool lap_completed = false;
 
-     // Check if we are close to the starting line (e.g., within 1 meter)
+    // Check if we are close to the starting line (e.g., within 1 meter)
     switch (current_mission_.data){
         case lart_msgs::msg::Mission::ACCELERATION:
             if (abs(x-75.0) < lap_margin_x_) {
@@ -385,8 +414,25 @@ void GraphSLAM::publish_map()
         auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
         if (v_landmark) {
             const Eigen::Vector2d &est = v_landmark->estimate();
-            auto* e = static_cast<g2o::EdgeSE2PointXY*>(*v_landmark->edges().begin());
-            const Eigen::MatrixXd &info = e->information();
+            g2o::EdgeSE2PointXY* most_recent_edge = nullptr;
+            int max_pose_id = -1;
+
+            for (auto* edge_base : v_landmark->edges()) {
+                // 1. Safely check the type
+                auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);
+                if (!e_se2xy) continue;
+
+                // 2. The robot pose is usually vertex(0) in an EdgeSE2PointXY
+                int current_pose_id = e_se2xy->vertex(0)->id();
+
+                // 3. Keep the one with the highest ID (most recent in time)
+                if (current_pose_id > max_pose_id) {
+                    max_pose_id = current_pose_id;
+                    most_recent_edge = e_se2xy;
+                }
+            }
+
+            const Eigen::Matrix2d &info = most_recent_edge->information();
             Eigen::Matrix2d cov = info.inverse();
     
             visualization_msgs::msg::Marker marker;

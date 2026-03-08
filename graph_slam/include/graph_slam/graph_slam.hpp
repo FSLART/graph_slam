@@ -21,6 +21,7 @@
 #include <visualization_msgs/msg/marker.hpp>
 
 #include <chrono>
+#include <map>
 
 #include <g2o/core/sparse_optimizer.h>
 #include <g2o/core/optimization_algorithm_gauss_newton.h>
@@ -63,12 +64,13 @@ private:
     rclcpp::Publisher<lart_msgs::msg::SlamStats>::SharedPtr slam_stats_publisher_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr map_publisher_;
 
-    typedef struct{
-        int id;
-        float x;
-        float y;
-        int type;
-    } cone;
+    struct GridPos {
+        float x, y;
+        bool operator<(const GridPos& other) const {
+            if (x != other.x) return x < other.x;
+            return y < other.y;
+        }
+    };
 
     g2o::SparseOptimizer optimizer_;
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
@@ -104,11 +106,11 @@ private:
 
     bool localization_mode_ = false;
     
-
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
     void broadcast_transform();
     void publish_map();
+
     
 protected:
     AssociationSolver *association_solver_;
