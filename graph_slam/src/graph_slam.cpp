@@ -472,6 +472,9 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
     optimizer_.updateInitialization(vset, eset);
 
     double chi_before = optimizer_.activeChi2();
+
+    optimizer_.computeActiveErrors();
+
     optimizer_.optimize(5, true);
     double chi_after = optimizer_.activeChi2();
 
