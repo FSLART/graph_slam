@@ -32,7 +32,7 @@
 #include <g2o/types/slam2d/edge_se2_pointxy.h>
 
 
-#define ASSOCIATION_MODE 0
+#define ASSOCIATION_MODE 1
 #define CONES_TOPIC "/mapping/cones"
 #define DYNAMICS_TOPIC "/acu_origin/dynamics"
 #define IMU_TOPIC "/imu/angular_velocity"

@@ -140,12 +140,43 @@ public:
     {
 
         std::vector<graph_slam_types::Cone> obs_global = obsToGlobal(observations, pose);
-        // TODO: implement Mahalanobis distance-based association
-        // d^2 = (z - h(x))^T S^{-1} (z - h(x))
-        (void)map_cones;
+        std::vector<int> associations(observations.size(), -1);
 
-        // For now, treat all observations as unmatched
-        return {std::vector<int>(observations.size(), -1), obs_global};
+        // Chi-squared threshold for 2 degrees of freedom (x, y) 
+        // 5.991 corresponds to a 95% confidence interval
+        const double threshold = 5.0;
+
+        for (size_t i = 0; i < obs_global.size(); ++i) {
+            double min_dist = std::numeric_limits<double>::max();
+            int best_idx = -1;
+
+            Eigen::Vector2d z(obs_global[i].x, obs_global[i].y);
+            // Convert information matrix to covariance: S = Omega^-1
+            Eigen::Matrix2d S = obs_global[i].information.inverse();
+
+            for (size_t j = 0; j < map_cones.size(); ++j) {
+                // Only match cones of the same type (color)
+                if (obs_global[i].type != map_cones[j].type) continue;
+
+                Eigen::Vector2d z_hat(map_cones[j].x, map_cones[j].y);
+                Eigen::Vector2d diff = z - z_hat;
+
+                // Mahalanobis distance: d^2 = diff^T * S^-1 * diff
+                // Note: Since S^-1 is the information matrix, we can use it directly!
+                double d2 = diff.transpose() * obs_global[i].information * diff;
+
+                if (d2 < threshold && d2 < min_dist) {
+                    min_dist = d2;
+                    best_idx = j;
+                }
+            }
+
+            if (best_idx != -1) {
+                associations[i] = map_cones[best_idx].id;
+            }
+        }
+
+        return {associations, obs_global};
     }
 };
 
@@ -255,39 +286,44 @@ std::pair<std::vector<int>, std::vector<graph_slam_types::Cone>> AssociationSolv
 
 Eigen::Matrix2d AssociationSolver::get_info_matrix(double x, double y)
 {
-    // 1. Clamp input to grid bounds
-        x = std::clamp(x, x_grid.front(), x_grid.back());
-        y = std::clamp(y, y_grid.front(), y_grid.back());
+    // 1. Clamp and Grid Search (Same as before)
+    x = std::clamp(x, x_grid.front(), x_grid.back());
+    y = std::clamp(y, y_grid.front(), y_grid.back());
 
-        // 2. Find neighboring indices
-        auto it_x = std::lower_bound(x_grid.begin(), x_grid.end(), x);
-        int x1_idx = std::distance(x_grid.begin(), it_x) - (it_x == x_grid.begin() ? 0 : 1);
-        int x2_idx = std::min(x1_idx + 1, (int)x_grid.size() - 1);
+    auto it_x = std::lower_bound(x_grid.begin(), x_grid.end(), x);
+    int x1_idx = std::distance(x_grid.begin(), it_x) - (it_x == x_grid.begin() ? 0 : 1);
+    int x2_idx = std::min(x1_idx + 1, (int)x_grid.size() - 1);
 
-        auto it_y = std::lower_bound(y_grid.begin(), y_grid.end(), y);
-        int y1_idx = std::distance(y_grid.begin(), it_y) - (it_y == y_grid.begin() ? 0 : 1);
-        int y2_idx = std::min(y1_idx + 1, (int)y_grid.size() - 1);
+    auto it_y = std::lower_bound(y_grid.begin(), y_grid.end(), y);
+    int y1_idx = std::distance(y_grid.begin(), it_y) - (it_y == y_grid.begin() ? 0 : 1);
+    int y2_idx = std::min(y1_idx + 1, (int)y_grid.size() - 1);
 
-        double x1 = x_grid[x1_idx], x2 = x_grid[x2_idx];
-        double y1 = y_grid[y1_idx], y2 = y_grid[y2_idx];
-
-        // 3. Perform Bilinear Interpolation for dx and dy separately
-        auto get_err = [&](int xi, int yi) { return table[{x_grid[xi], y_grid[yi]}]; };
+    // 2. Interpolate Errors
+    auto get_err = [&](int xi, int yi) { return table.at({x_grid[xi], y_grid[yi]}); };
     
-        double dx = interpolate(x, y, x1, x2, y1, y2, 
-                               get_err(x1_idx, y1_idx).first, get_err(x2_idx, y1_idx).first,
-                               get_err(x1_idx, y2_idx).first, get_err(x2_idx, y2_idx).first);
+    double dx = interpolate(x, y, x_grid[x1_idx], x_grid[x2_idx], y_grid[y1_idx], y_grid[y2_idx], 
+                           get_err(x1_idx, y1_idx).first, get_err(x2_idx, y1_idx).first,
+                           get_err(x1_idx, y2_idx).first, get_err(x2_idx, y2_idx).first);
 
-        double dy = interpolate(x, y, x1, x2, y1, y2, 
-                               get_err(x1_idx, y1_idx).second, get_err(x2_idx, y1_idx).second,
-                               get_err(x1_idx, y2_idx).second, get_err(x2_idx, y2_idx).second);
+    double dy = interpolate(x, y, x_grid[x1_idx], x_grid[x2_idx], y_grid[y1_idx], y_grid[y2_idx], 
+                           get_err(x1_idx, y1_idx).second, get_err(x2_idx, y1_idx).second,
+                           get_err(x1_idx, y2_idx).second, get_err(x2_idx, y2_idx).second);
 
-        // 4. Construct Information Matrix (1/variance)
-        Eigen::Matrix2d info = Eigen::Matrix2d::Zero();
-        info(0, 0) = 1.0 / std::max(1e-4, dx * dx);
-        info(1, 1) = 1.0 / std::max(1e-4, dy * dy);
+    // 3. Robust Variance Calculation
+    // min_sigma: The best possible precision you trust (e.g., 0.1 units)
+    // max_sigma: The worst precision before you consider a measurement "useless"
+    const double min_sigma = 0.1; 
+    const double max_sigma = 2.0; 
 
-        return info;
+    // Add noise floor and clamp the error values before squaring
+    double sigma_x = std::clamp(dx, min_sigma, max_sigma);
+    double sigma_y = std::clamp(dy, min_sigma, max_sigma);
+
+    Eigen::Matrix2d info = Eigen::Matrix2d::Zero();
+    info(0, 0) = 1.0 / (sigma_x * sigma_x);
+    info(1, 1) = 1.0 / (sigma_y * sigma_y);
+
+    return info;
 }
 
 double AssociationSolver::interpolate(double x, double y, double x1, double x2, double y1, double y2, double q11, double q21, double q12, double q22){

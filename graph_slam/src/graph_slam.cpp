@@ -216,7 +216,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             if (matches[i] != -1){
                 landmark_id= matches[i];
     
-                dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global[i].x, obs_global[i].y));
+                // dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global[i].x, obs_global[i].y));
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
             } else {
                 VertexLandmark2D* landmark = new VertexLandmark2D();
@@ -230,14 +230,14 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu is a new cone.", i);
             }
     
-            // Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
+            Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
     
     
-            // double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
-            // double sigma_y = k_lateral * d + base_lateral_uncertainty_;
+            double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
+            double sigma_y = k_lateral * d + base_lateral_uncertainty_;
     
-            // information(0, 0) = (1.0 / (sigma_x * sigma_x))/2; // Inverse of sigma_x^2
-            // information(1, 1) = (1.0 / (sigma_y * sigma_y))/2; // Inverse of sigma_y^2
+            information(0, 0) = (1.0 / (sigma_x * sigma_x))/2; // Inverse of sigma_x^2
+            information(1, 1) = (1.0 / (sigma_y * sigma_y))/2; // Inverse of sigma_y^2
     
     
             EdgeSE2PointXY* edge = new EdgeSE2PointXY();
@@ -246,7 +246,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
 
             // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
-            edge->setInformation(association_solver_->get_info_matrix(x, y)); // Use the computed information matrix
+            edge->setInformation(information); // Use the computed information matrix
 
             this->optimizer_.addEdge(edge);
         }

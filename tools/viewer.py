@@ -24,7 +24,7 @@ plt.rcParams.update(
 # Maps from vertex id -> (x, y)
 poses = {}
 
-show_pose_landmark_edges = False
+show_pose_landmark_edges = True
 show_odmetry_edges = True
 
 # Lists of (from_id, to_id) for different edge types
@@ -39,7 +39,7 @@ yellow_landmarks = {}
 orange_landmarks = {}
 big_orange_landmarks = {}
 
-with open("/home/andre-lopes/Desktop/ros2_ws/optimized_graph.g2o", "r") as f:
+with open("/home/andre-lopes/Desktop/ros2_ws/final_graph.g2o", "r") as f:
     for line in f:
         parts = line.split()
         if not parts:
