@@ -138,21 +138,18 @@ public:
                                const std::vector<graph_slam_types::Cone> &map_cones,
                                const Eigen::Vector3d &pose) override
     {
-
+        auto start_time = std::chrono::steady_clock::now();
         std::vector<graph_slam_types::Cone> obs_global = obsToGlobal(observations, pose);
         std::vector<int> associations(observations.size(), -1);
 
         // Chi-squared threshold for 2 degrees of freedom (x, y) 
-        // 5.991 corresponds to a 95% confidence interval
-        const double threshold = 5.0;
+        const double threshold = 4.3;
 
         for (size_t i = 0; i < obs_global.size(); ++i) {
             double min_dist = std::numeric_limits<double>::max();
             int best_idx = -1;
 
             Eigen::Vector2d z(obs_global[i].x, obs_global[i].y);
-            // Convert information matrix to covariance: S = Omega^-1
-            Eigen::Matrix2d S = obs_global[i].information.inverse();
 
             for (size_t j = 0; j < map_cones.size(); ++j) {
                 // Only match cones of the same type (color)
@@ -176,6 +173,9 @@ public:
             }
         }
 
+        auto end_time = std::chrono::steady_clock::now();
+        auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+        RCLCPP_INFO(rclcpp::get_logger("association_solver"), "Mahalanobis association took %.3f ms.", duration_ms);
         return {associations, obs_global};
     }
 };

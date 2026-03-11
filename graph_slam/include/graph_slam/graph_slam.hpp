@@ -63,6 +63,7 @@ private:
     //Publishers
     rclcpp::Publisher<lart_msgs::msg::SlamStats>::SharedPtr slam_stats_publisher_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr map_publisher_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
 
     struct GridPos {
         float x, y;
@@ -93,6 +94,7 @@ private:
     long frame_count_ = 0;
     long observation_count_ = 0;
     double time_sum_ = 0.0;
+    bool is_robot_moving_= false;
 
     //Lap logic variables
     lart_msgs::msg::Mission current_mission_;

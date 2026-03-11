@@ -134,6 +134,10 @@ void GraphSLAM::broadcast_transform()
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
 {
+    if(!is_robot_moving_){
+        RCLCPP_DEBUG(this->get_logger(), "Robot is stationary. Skipping ConeArray processing.");
+        return; // Skip processing if the robot is not moving
+    }
     auto start_time = std::chrono::steady_clock::now();
     RCLCPP_DEBUG(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
     this->observation_count_++;
@@ -278,6 +282,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
 {
+    is_robot_moving_ = true; // Update the robot's moving status
     if (frame_count_ % 5 != 0) {
         frame_count_++;
         return; // Skip this callback to reduce frequency
