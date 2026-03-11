@@ -16,17 +16,17 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 
     // Subscribe to the cone observations topic
     observations_subscriber_ = this->create_subscription<lart_msgs::msg::ConeArray>(
-        CONES_TOPIC, 10,
+        CONES_TOPIC, 1,
         bind(&GraphSLAM::observations_callback, this, _1));
 
     // Subscribe to the dynamics topic
     dynamics_subscriber_ = this->create_subscription<lart_msgs::msg::Dynamics>(
-        DYNAMICS_TOPIC, 10,
+        DYNAMICS_TOPIC, 1,
         bind(&GraphSLAM::dynamics_callback, this, _1));
 
     //Subscribe to angular velocity topic 
     imu_subscriber_ = this->create_subscription<geometry_msgs::msg::Vector3Stamped>(
-        IMU_TOPIC, 10,
+        IMU_TOPIC, 1,
         bind(&GraphSLAM::imu_callback, this, _1));
 
     mission_subscriber_ = this->create_subscription<lart_msgs::msg::Mission>(
@@ -465,43 +465,21 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
         return;
     }
 
-    if(eset.size() < 20){
+    if(vset.size() < 20){
         return; // Not enough new information to warrant an update
     }
 
     optimizer_.updateInitialization(vset, eset);
 
+    optimizer_.computeActiveErrors();
     double chi_before = optimizer_.activeChi2();
 
-    optimizer_.computeActiveErrors();
+    optimizer_.optimize(1, true);
 
-    optimizer_.optimize(5, true);
+    optimizer_.computeActiveErrors();
     double chi_after = optimizer_.activeChi2();
 
     RCLCPP_INFO(this->get_logger(),"chi2 before %.4f after %.4f",chi_before, chi_after);
-
-    double chi = 0;
-
-    for (auto *edge_base : optimizer_.edges())
-    {
-        auto *edge = dynamic_cast<g2o::OptimizableGraph::Edge *>(edge_base);
-        if (!edge) {
-            continue;
-        }
-
-        edge->computeError();
-        const double edge_chi2 = edge->chi2();
-
-        if (!std::isfinite(edge_chi2))
-        {
-            RCLCPP_ERROR(this->get_logger(), "Edge produced invalid chi2!");
-        }
-
-        chi += edge_chi2;
-    }
-
-    RCLCPP_INFO(this->get_logger(), "manual chi2 = %f", chi);
-
 
     // Clear the sets after the update
     this->new_vertices.clear();
