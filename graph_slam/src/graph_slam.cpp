@@ -79,29 +79,20 @@ GraphSLAM::~GraphSLAM()
     RCLCPP_INFO(this->get_logger(), "average processing time per ConeArray: %.3f ms", time_sum_ / observation_count_);
     this->optimizer_.save("final_graph.g2o");
 
-    const auto &verts = optimizer_.vertices();
+    const auto& verts = optimizer_.vertices();
     std::vector<std::pair<int, VertexLandmark2D*>> landmarks_to_remove;
     landmarks_to_remove.reserve(verts.size());
-    for (const auto &kv : verts) {
-        auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
+    for (const auto& kv : verts) {
+        auto* v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
         if (v_landmark && v_landmark->edges().size() < 4) {
             landmarks_to_remove.emplace_back(kv.first, v_landmark);
         }
     }
 
-    for (const auto &item : landmarks_to_remove) {
-        const int vertex_id = item.first;
+    for (const auto& item : landmarks_to_remove) {
         VertexLandmark2D* v_landmark = item.second;
         this->optimizer_.removeVertex(v_landmark);
-        RCLCPP_DEBUG(this->get_logger(), "Removed landmark vertex ID %d due to insufficient constraints.", vertex_id);
     }
-
-    //Commented out for online use
-
-    // this->optimizer_.initializeOptimization();
-    // const int iterations = this->optimizer_.optimize(10);
-    // RCLCPP_INFO(this->get_logger(), "Graph optimization finished (%d iterations).", iterations);
-    // this->optimizer_.save("optimized_graph.g2o");
 
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
@@ -199,6 +190,9 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
                 landmark->setId(++landmark_id_counter_);
                 landmark->setEstimate(Eigen::Vector2d(obs_global.cones[i].position.x, obs_global.cones[i].position.y));
                 landmark->setColor(msg->cones[i].class_type.data);
+                // if(!this->initialized_once && msg->cones[i].class_type.data == 3){ // If the first observation is a blue cone, fix it to anchor the graph
+                //     landmark->setFixed(true); //fix initial landmarks
+                // }
                 this->optimizer_.addVertex(landmark);
                 this->new_vertices.insert(landmark); // Add new landmark vertex for update bookeeping
     
@@ -235,7 +229,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
             edge->setInformation(information); // Use the computed information matrix
 
-            // Add robust kernel here
+            // Add robust kernel hereinitialized_once
             auto rk = new RobustKernelHuber();
             rk->setDelta(0.5);
             edge->setRobustKernel(rk);
@@ -345,9 +339,6 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     odom_edge->setInformation(Eigen::Matrix3d::Identity()*120);
     optimizer_.addEdge(odom_edge);
     this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
-    
-    //Update graph with new odom information
-    update_graph(this->new_vertices, this->new_edges);
 
     RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
 
@@ -451,21 +442,25 @@ void GraphSLAM::check_lap_completion()
     }
 }
 
-void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset){
 
+void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset)
+{
     //RCLCPP_INFO(this->get_logger(), "Only %zu new edges and %zu new vertices since last update. Skipping graph update.", eset.size(), vset.size());
 
     if(!this->initialized_once){
-        RCLCPP_INFO(this->get_logger(), "Performing initial graph optimization with %zu vertices and %zu edges.", optimizer_.vertices().size(), optimizer_.edges().size());
+        RCLCPP_INFO(this->get_logger(), "Performing initial graph optimization with %zu vertices and %zu edges.",
+                    optimizer_.vertices().size(), optimizer_.edges().size());
+
         this->optimizer_.initializeOptimization();
-        this->optimizer_.optimize(10); // TODO: tune the number of iterations for the initial optimization
+        this->optimizer_.optimize(10); // initial batch solve
+        
         this->initialized_once = true;
         this->new_vertices.clear();
         this->new_edges.clear();
         return;
     }
 
-    if(vset.size() < 20){
+    if(vset.size() < 60){
         return; // Not enough new information to warrant an update
     }
 
@@ -474,7 +469,7 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
     optimizer_.computeActiveErrors();
     double chi_before = optimizer_.activeChi2();
 
-    optimizer_.optimize(1, true);
+    optimizer_.optimize(1, true); // one incremental step each time
 
     optimizer_.computeActiveErrors();
     double chi_after = optimizer_.activeChi2();
