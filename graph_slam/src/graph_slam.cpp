@@ -33,7 +33,12 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 
     slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>(STATS_TOPIC, 10);
     
-    map_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(MAP_MARKERS_TOPIC, 10);
+    map_markers_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(MAP_MARKERS_TOPIC, 10);
+
+    map_publisher_ = this->create_publisher<lart_msgs::msg::ConeArray>(MAP_TOPIC, 10);
+
+    pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(POSE_TOPIC, 10);
+    pose_marker_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>(POSE_MARKER_TOPIC, 10);
     
     auto linearSolver = std::make_unique<SlamLinearSolver>();
 
@@ -307,8 +312,36 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     odom_edge->setMeasurement(SE2(get<0>(deltas), get<1>(deltas), get<2>(deltas)));
     odom_edge->setInformation(Eigen::Matrix3d::Identity()*80);
     optimizer_.addEdge(odom_edge);
-    RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
 
+    geometry_msgs::msg::PoseStamped pose_msg;
+    pose_msg.header.stamp = this->get_clock()->now();
+    pose_msg.header.frame_id = "world";
+    pose_msg.pose.position.x = current_pose_[0];
+    pose_msg.pose.position.y = current_pose_[1];
+    pose_msg.pose.position.z = 0.0;
+    pose_msg.pose.orientation = tf2::toMsg(tf2::Quaternion(tf2::Vector3(0, 0, 1), current_pose_[2]));
+
+    this->pose_publisher_->publish(pose_msg);
+
+    visualization_msgs::msg::Marker pose_marker;
+    pose_marker.header.stamp = this->get_clock()->now();
+    pose_marker.header.frame_id = "world";
+    pose_marker.ns = "graph_slam";
+    pose_marker.id = 0;
+    pose_marker.type = visualization_msgs::msg::Marker::ARROW;
+    pose_marker.action = visualization_msgs::msg::Marker::ADD;
+    pose_marker.pose = pose_msg.pose;
+    pose_marker.scale.x = 1.7; // Arrow length
+    pose_marker.scale.y = 0.5; // Arrow width
+    pose_marker.scale.z = 0.2; // Arrow height
+    pose_marker.color.a = 1.0; // Fully opaque
+    pose_marker.color.r = 0.0f;
+    pose_marker.color.g = 1.0f;
+    pose_marker.color.b = 0.0f;
+
+    this->pose_marker_publisher_->publish(pose_marker);
+
+    RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
 }
 
 void GraphSLAM::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg)
@@ -415,6 +448,7 @@ void GraphSLAM::publish_map()
 {
     const auto &verts_map = optimizer_.vertices();
     visualization_msgs::msg::MarkerArray map_markers_;
+    lart_msgs::msg::ConeArray map_cones_msg;
     for (const auto &kv : verts_map) {
         auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
         if (v_landmark) {
@@ -439,7 +473,15 @@ void GraphSLAM::publish_map()
 
             const Eigen::Matrix2d &info = most_recent_edge->information();
             Eigen::Matrix2d cov = info.inverse();
-    
+            
+            //Map
+            lart_msgs::msg::Cone cone_msg;
+            cone_msg.position.x = est[0];
+            cone_msg.position.y = est[1];
+            cone_msg.class_type.data = v_landmark->color();
+            cone_msg.cone_id.data = v_landmark->id();
+            map_cones_msg.cones.push_back(cone_msg);
+            //Markers
             visualization_msgs::msg::Marker marker;
             marker.header.stamp = this->get_clock()->now();
             marker.header.frame_id = "world";
@@ -486,7 +528,8 @@ void GraphSLAM::publish_map()
             map_markers_.markers.push_back(marker);
         }
     }
-    map_publisher_->publish(map_markers_);
+    map_publisher_->publish(map_cones_msg);
+    map_markers_publisher_->publish(map_markers_);
 }
 
 int main(int argc, char *argv[])

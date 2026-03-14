@@ -143,7 +143,7 @@ public:
         std::vector<int> associations(observations.size(), -1);
 
         // Chi-squared threshold for 2 degrees of freedom (x, y) 
-        const double threshold = 4.3;
+        const double threshold = 3.9;
 
         for (size_t i = 0; i < obs_global.size(); ++i) {
             double min_dist = std::numeric_limits<double>::max();

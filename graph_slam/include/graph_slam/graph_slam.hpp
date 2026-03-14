@@ -10,6 +10,7 @@
 #include "lart_msgs/msg/cone_array.hpp"
 #include "lart_msgs/msg/mission.hpp"
 #include "lart_msgs/msg/slam_stats.hpp"
+#include "lart_msgs/msg/cone.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/vector3_stamped.hpp>
@@ -17,6 +18,7 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 
@@ -33,12 +35,15 @@
 
 
 #define ASSOCIATION_MODE 1
-#define CONES_TOPIC "/mapping/cones"
-#define DYNAMICS_TOPIC "/acu_origin/dynamics"
+#define CONES_TOPIC "/mapping/cones" // observations
+#define DYNAMICS_TOPIC "/acu_origin/dynamics" //rpm and all
 #define IMU_TOPIC "/imu/angular_velocity"
-#define MAP_MARKERS_TOPIC "/slam/map/markers"
-#define STATS_TOPIC "/slam/stats"
 #define MISSION_TOPIC "/mission"
+#define MAP_MARKERS_TOPIC "/slam/map/markers"
+#define MAP_TOPIC "/slam/map"
+#define POSE_TOPIC "/slam/pose"
+#define POSE_MARKER_TOPIC "/slam/pose_marker"
+#define STATS_TOPIC "/slam/stats"
 
 
 
@@ -62,8 +67,12 @@ private:
     
     //Publishers
     rclcpp::Publisher<lart_msgs::msg::SlamStats>::SharedPtr slam_stats_publisher_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr map_publisher_;
+
+    rclcpp::Publisher<lart_msgs::msg::ConeArray>::SharedPtr map_publisher_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr map_markers_publisher_;
+
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pose_marker_publisher_;
 
     struct GridPos {
         float x, y;
