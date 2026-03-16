@@ -275,6 +275,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             this->optimizer_.addEdge(edge);
             this->new_edges.insert(edge); // Add new edge for update bookkeeping
         }
+        update_graph(this->new_vertices, this->new_edges);
 
     }else {
         RCLCPP_WARN(this->get_logger(), "Current pose vertex not found in the graph. Probably no pose initialized.");
