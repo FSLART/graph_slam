@@ -39,7 +39,7 @@ yellow_landmarks = {}
 orange_landmarks = {}
 big_orange_landmarks = {}
 
-with open("/home/andre-lopes/Desktop/ros2_ws/optimized_graph.g2o", "r") as f:
+with open("/home/andre-lopes/Desktop/ros2_ws/final_graph.g2o", "r") as f:
     for line in f:
         parts = line.split()
         if not parts:
@@ -123,7 +123,7 @@ if show_pose_landmark_edges:
 
 # Overlay ground-truth map from YAML (cones and centerline)
 try:
-    with open("/home/andre-lopes/Desktop/ros2_ws/src/PacSim/tracks/FSO20.yaml", "r") as yf:
+    with open("/home/andre-lopes/Downloads/FSG25_FEUP.yaml", "r") as yf:
         yaml_data = yaml.safe_load(yf) or {}
 
     # The data is nested under 'track' based on your YAML snippet
@@ -155,6 +155,17 @@ try:
             s=35,
             label="GT Yellow Cones",
         )
+    unknown_lane = track_data.get("unknown", [])
+    if unknown_lane:
+        yx = [cone["position"][0] for cone in unknown_lane]
+        yy = [cone["position"][1] for cone in unknown_lane]
+        plt.scatter(
+            yx, yy,
+            facecolors="none",
+            edgecolors="white",
+            s=35,
+            label="GT Unknown Cones",
+        )
 
     # 3. Ground-truth big orange cones (appearing in 'right' and 'unknown' sections)
     # This searches both lanes for the 'big-orange' class
@@ -175,7 +186,7 @@ try:
         )
 
 except FileNotFoundError:
-    print(f"Ground-truth map file not found at {yaml_path}")
+    print("Ground-truth map file not found")
 except Exception as e:
     print(f"Failed to load ground-truth map: {e}")
 

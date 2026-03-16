@@ -9,5 +9,6 @@ def generate_launch_description():
             executable='graph_slam_node',
             name='graph_slam_node',
             output='screen',
+            # arguments=['--ros-args', '--log-level', 'debug'],
         )
     ])
