@@ -89,8 +89,31 @@ GraphSLAM::~GraphSLAM()
 {
     RCLCPP_INFO(this->get_logger(), "average processing time per ConeArray: %.3f ms", time_sum_ / observation_count_);
     this->optimizer_.save("final_graph.g2o");
+<<<<<<< HEAD
     if(this->current_mission_.data == lart_msgs::msg::Mission::AUTOCROSS || this->current_mission_.data == lart_msgs::msg::Mission::TRACKDRIVE)
         MapManager::save_map(this->current_mission_.data, this->optimizer_);
+=======
+
+    const auto& verts = optimizer_.vertices();
+    std::vector<std::pair<int, VertexLandmark2D*>> landmarks_to_remove;
+    landmarks_to_remove.reserve(verts.size());
+    for (const auto& kv : verts) {
+        auto* v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
+        if (v_landmark && v_landmark->edges().size() < 4) {
+            landmarks_to_remove.emplace_back(kv.first, v_landmark);
+        }
+    }
+
+    for (const auto& item : landmarks_to_remove) {
+        VertexLandmark2D* v_landmark = item.second;
+        this->optimizer_.removeVertex(v_landmark);
+    }
+
+    this->optimizer_.initializeOptimization();
+    const int iterations = this->optimizer_.optimize(10);
+    RCLCPP_INFO(this->get_logger(), "Graph optimization finished (%d iterations).", iterations);
+    this->optimizer_.save("optimized_graph.g2o");
+>>>>>>> 605e0c5 (Save the optimized version)
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
 }
