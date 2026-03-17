@@ -38,7 +38,7 @@ yellow_landmarks = {}
 orange_landmarks = {}
 big_orange_landmarks = {}
 
-with open("/home/tomas/data/ros2_ws/final_graph.g2o", "r") as f:
+with open("/home/andre-lopes/Desktop/ros2_ws/final_graph.g2o", "r") as f:
     for line in f:
         parts = line.split()
         if not parts:

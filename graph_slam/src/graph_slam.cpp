@@ -8,9 +8,9 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 {
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been started.");
 
-    //this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
-    this->current_mission_.data = 6;
-    this->mission_set_ = true;
+    this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
+    // this->current_mission_.data = 6;
+    // this->mission_set_ = true;
 
     association_solver_ = new AssociationSolver(ASSOCIATION_MODE);
 
@@ -84,21 +84,6 @@ GraphSLAM::~GraphSLAM()
     RCLCPP_INFO(this->get_logger(), "average processing time per ConeArray: %.3f ms", time_sum_ / observation_count_);
     this->optimizer_.save("final_graph.g2o");
 
-    const auto& verts = optimizer_.vertices();
-    std::vector<std::pair<int, VertexLandmark2D*>> landmarks_to_remove;
-    landmarks_to_remove.reserve(verts.size());
-    for (const auto& kv : verts) {
-        auto* v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
-        if (v_landmark && v_landmark->edges().size() < 4) {
-            landmarks_to_remove.emplace_back(kv.first, v_landmark);
-        }
-    }
-
-    for (const auto& item : landmarks_to_remove) {
-        VertexLandmark2D* v_landmark = item.second;
-        this->optimizer_.removeVertex(v_landmark);
-    }
-
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
 }
@@ -168,7 +153,9 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
             g2o::EdgeSE2PointXY* most_recent_edge = nullptr;
             int max_pose_id = -1;
-
+            if (v_landmark->edges().empty()) {
+                continue; // Skip landmarks with no edges, as we have no information about their uncertainty
+            }
             for (auto* edge_base : v_landmark->edges()) {
                 // 1. Safely check the type
                 auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);
@@ -377,6 +364,12 @@ void GraphSLAM::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg)
         this->current_mission_.data = msg->data;
         mission_set_ = true;
         RCLCPP_INFO(this->get_logger(), "Mission set to %d", this->current_mission_.data);
+        if (this->current_mission_.data == lart_msgs::msg::Mission::SKIDPAD) {
+            std::string package_share_dir = ament_index_cpp::get_package_share_directory("graph_slam");
+            std::string map_path = package_share_dir + SKIDPAD_MAP;
+            landmark_id_counter_ = MapManager::load_map(map_path, this->optimizer_);
+            RCLCPP_INFO(this->get_logger(), "Skidpad map loaded with %zu vertices.", this->optimizer_.vertices().size());
+        }
     } else {
         RCLCPP_WARN(this->get_logger(), "Mission already set. Ignoring new mission message.");
     }
@@ -460,7 +453,20 @@ void GraphSLAM::check_lap_completion()
         this->current_lap_++;
         this->current_lap_distance_ = 0.0; // Reset distance for the next lap
         if (this->current_lap_ == 1) {
-            // TODO: call full optimization after the first lap is completed
+            const auto& verts = optimizer_.vertices();
+            std::vector<std::pair<int, VertexLandmark2D*>> landmarks_to_remove;
+            landmarks_to_remove.reserve(verts.size());
+            for (const auto& kv : verts) {
+                auto* v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
+                if (v_landmark && v_landmark->edges().size() < 4) {
+                    landmarks_to_remove.emplace_back(kv.first, v_landmark);
+                }
+            }
+
+            for (const auto& item : landmarks_to_remove) {
+                VertexLandmark2D* v_landmark = item.second;
+                this->optimizer_.removeVertex(v_landmark);
+            }
         }
     }
 }
@@ -516,7 +522,9 @@ void GraphSLAM::publish_map()
             const Eigen::Vector2d &est = v_landmark->estimate();
             g2o::EdgeSE2PointXY* most_recent_edge = nullptr;
             int max_pose_id = -1;
-
+            if (v_landmark->edges().empty()) {
+                continue; // Skip landmarks with no edges, as we have no information about their uncertainty
+            }
             for (auto* edge_base : v_landmark->edges()) {
                 // 1. Safely check the type
                 auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);
