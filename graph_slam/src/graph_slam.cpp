@@ -83,7 +83,8 @@ GraphSLAM::~GraphSLAM()
 {
     RCLCPP_INFO(this->get_logger(), "average processing time per ConeArray: %.3f ms", time_sum_ / observation_count_);
     this->optimizer_.save("final_graph.g2o");
-
+    if(this->current_mission_.data == lart_msgs::msg::Mission::AUTOCROSS || this->current_mission_.data == lart_msgs::msg::Mission::TRACKDRIVE)
+        MapManager::save_map(this->current_mission_.data, this->optimizer_);
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
 }

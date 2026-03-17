@@ -5,6 +5,8 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <filesystem>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include "yaml-cpp/yaml.h"
 
 #include <g2o/core/sparse_optimizer.h>
@@ -23,7 +25,7 @@ public:
     MapManager();
     ~MapManager();
     static long load_map(const std::string& filename, SparseOptimizer& optimizer_);
-    static void save_map(const std::string& filename, SparseOptimizer& optimizer_);
+    static void save_map(const int mission, SparseOptimizer& optimizer_);
     static uint8_t getColorID(const std::string& class_str);
 };
 
