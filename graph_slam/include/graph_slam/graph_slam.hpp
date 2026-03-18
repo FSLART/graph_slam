@@ -43,7 +43,7 @@
 #define CONES_TOPIC "/mapping/cones" // observations  
 #define DYNAMICS_TOPIC "/acu_origin/dynamics" //rpm and all
 #define IMU_TOPIC "/imu/angular_velocity"
-#define MISSION_TOPIC "/mission"
+#define MISSION_TOPIC "/pc_origin/system_status/critical_as/mission"
 #define MAP_MARKERS_TOPIC "/slam/map/markers"
 #define MAP_TOPIC "/slam/map"
 #define POSE_TOPIC "/slam/pose"

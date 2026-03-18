@@ -120,6 +120,33 @@ void GraphSLAM::broadcast_transform()
 
     tf_broadcaster_->sendTransform(transformStamped);
     
+    geometry_msgs::msg::PoseStamped pose_msg;
+    pose_msg.header.stamp = this->get_clock()->now();
+    pose_msg.header.frame_id = "world";
+    pose_msg.pose.position.x = current_pose_[0];
+    pose_msg.pose.position.y = current_pose_[1];
+    pose_msg.pose.position.z = 0.0;
+    pose_msg.pose.orientation = tf2::toMsg(tf2::Quaternion(tf2::Vector3(0, 0, 1), current_pose_[2]));
+
+    this->pose_publisher_->publish(pose_msg);
+
+    visualization_msgs::msg::Marker pose_marker;
+    pose_marker.header.stamp = this->get_clock()->now();
+    pose_marker.header.frame_id = "world";
+    pose_marker.ns = "graph_slam";
+    pose_marker.id = 0;
+    pose_marker.type = visualization_msgs::msg::Marker::ARROW;
+    pose_marker.action = visualization_msgs::msg::Marker::ADD;
+    pose_marker.pose = pose_msg.pose;
+    pose_marker.scale.x = 1.7; // Arrow length
+    pose_marker.scale.y = 0.5; // Arrow width
+    pose_marker.scale.z = 0.2; // Arrow height
+    pose_marker.color.a = 1.0; // Fully opaque
+    pose_marker.color.r = 0.0f;
+    pose_marker.color.g = 1.0f;
+    pose_marker.color.b = 0.0f;
+
+    this->pose_marker_publisher_->publish(pose_marker);
 }
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
@@ -327,34 +354,6 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     optimizer_.addEdge(odom_edge);
     this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
 
-
-    geometry_msgs::msg::PoseStamped pose_msg;
-    pose_msg.header.stamp = this->get_clock()->now();
-    pose_msg.header.frame_id = "world";
-    pose_msg.pose.position.x = current_pose_[0];
-    pose_msg.pose.position.y = current_pose_[1];
-    pose_msg.pose.position.z = 0.0;
-    pose_msg.pose.orientation = tf2::toMsg(tf2::Quaternion(tf2::Vector3(0, 0, 1), current_pose_[2]));
-
-    this->pose_publisher_->publish(pose_msg);
-
-    visualization_msgs::msg::Marker pose_marker;
-    pose_marker.header.stamp = this->get_clock()->now();
-    pose_marker.header.frame_id = "world";
-    pose_marker.ns = "graph_slam";
-    pose_marker.id = 0;
-    pose_marker.type = visualization_msgs::msg::Marker::ARROW;
-    pose_marker.action = visualization_msgs::msg::Marker::ADD;
-    pose_marker.pose = pose_msg.pose;
-    pose_marker.scale.x = 1.7; // Arrow length
-    pose_marker.scale.y = 0.5; // Arrow width
-    pose_marker.scale.z = 0.2; // Arrow height
-    pose_marker.color.a = 1.0; // Fully opaque
-    pose_marker.color.r = 0.0f;
-    pose_marker.color.g = 1.0f;
-    pose_marker.color.b = 0.0f;
-
-    this->pose_marker_publisher_->publish(pose_marker);
 
     RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
 }
