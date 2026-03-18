@@ -377,6 +377,8 @@ void GraphSLAM::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg)
             landmark_id_counter_ = MapManager::load_map(map_path, this->optimizer_);
             RCLCPP_INFO(this->get_logger(), "Skidpad map loaded with %zu vertices.", this->optimizer_.vertices().size());
         }
+        if (this->current_mission_.data == lart_msgs::msg::Mission::ACCELERATION)
+            this->current_lap_ = 0;
     } else {
         RCLCPP_WARN(this->get_logger(), "Mission already set. Ignoring new mission message.");
     }
@@ -427,7 +429,7 @@ void GraphSLAM::check_lap_completion()
         return; // you ain't got no motion
     }
 
-    if (this->current_lap_distance_ == 1){
+    if (this->current_lap_ == 1){
         this->localization_mode_ = true;
     }
 
@@ -523,6 +525,7 @@ void GraphSLAM::publish_map(std::vector<graph_slam_types::Cone> not_in_map_obser
     const auto &verts_map = optimizer_.vertices();
     visualization_msgs::msg::MarkerArray map_markers_;
     lart_msgs::msg::ConeArray map_cones_msg;
+    int id_counter = 1000;
     for (const auto& cone : not_in_map_observations) {
         lart_msgs::msg::Cone cone_msg;
         cone_msg.position.x = cone.x;
@@ -533,11 +536,11 @@ void GraphSLAM::publish_map(std::vector<graph_slam_types::Cone> not_in_map_obser
         visualization_msgs::msg::Marker marker;
         marker.header.stamp = this->get_clock()->now();
         marker.header.frame_id = "world";
+        marker.id = id_counter++; // Unique ID for each marker
         marker.ns = "graph_slam";
-        marker.id = -1;
         marker.type = visualization_msgs::msg::Marker::SPHERE;
         marker.action = visualization_msgs::msg::Marker::ADD;
-        marker.lifetime = rclcpp::Duration(0, 500000000); // Marker will last for 0.5 seconds
+        marker.lifetime = rclcpp::Duration(0, 400000000); // Marker will last for 0.5 seconds
         marker.pose.position.x = cone.x;
         marker.pose.position.y = cone.y;
         marker.pose.position.z = 0.0;
