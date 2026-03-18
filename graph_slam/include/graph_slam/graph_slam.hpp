@@ -132,7 +132,7 @@ private:
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
     void broadcast_transform();
-    void publish_map();
+    void publish_map(std::vector<graph_slam_types::Cone> cones = {});
 
     
 

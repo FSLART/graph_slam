@@ -119,7 +119,7 @@ void GraphSLAM::broadcast_transform()
     transformStamped.transform.rotation.w = q.w();
 
     tf_broadcaster_->sendTransform(transformStamped);
-    this->publish_map();
+    
 }
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
@@ -139,6 +139,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     const auto &verts = optimizer_.vertices();
     std::vector<graph_slam_types::Cone> map_cones_;
     std::vector<graph_slam_types::Cone> observations;
+    std::vector<graph_slam_types::Cone> not_added_observations;
     if (v_pose){
         for (const auto &kv : verts) {
             auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
@@ -199,6 +200,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
         
         const auto matches = association_result.first;
         const auto obs_global = association_result.second;
+
     
         for (size_t i = 0; i < observations.size(); ++i){
             long landmark_id = -1;
@@ -206,8 +208,11 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             double y = observations[i].y;
             double d = std::sqrt(x*x + y*y);
 
-            if (d > 10 )
+            if (d > 10 ){
+                not_added_observations.push_back(obs_global[i]);
                 continue; // Skip observations that are too far away, likely outliers
+            }
+
 
             if (matches[i] != -1){
                 landmark_id= matches[i];
@@ -289,6 +294,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     stats_msg.cones_count_current = observations.size();
     stats_msg.lap_count = this->current_lap_;
     this->slam_stats_publisher_->publish(stats_msg);
+    this->publish_map(not_added_observations);
 }
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
@@ -512,11 +518,38 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
 
 }
 
-void GraphSLAM::publish_map()
+void GraphSLAM::publish_map(std::vector<graph_slam_types::Cone> not_in_map_observations)
 {
     const auto &verts_map = optimizer_.vertices();
     visualization_msgs::msg::MarkerArray map_markers_;
     lart_msgs::msg::ConeArray map_cones_msg;
+    for (const auto& cone : not_in_map_observations) {
+        lart_msgs::msg::Cone cone_msg;
+        cone_msg.position.x = cone.x;
+        cone_msg.position.y = cone.y;
+        cone_msg.class_type.data = cone.type;
+        cone_msg.cone_id.data = -1; // Indicate that this is an unmatched observation
+        map_cones_msg.cones.push_back(cone_msg);
+        visualization_msgs::msg::Marker marker;
+        marker.header.stamp = this->get_clock()->now();
+        marker.header.frame_id = "world";
+        marker.ns = "graph_slam";
+        marker.id = -1;
+        marker.type = visualization_msgs::msg::Marker::SPHERE;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.lifetime = rclcpp::Duration(0, 500000000); // Marker will last for 0.5 seconds
+        marker.pose.position.x = cone.x;
+        marker.pose.position.y = cone.y;
+        marker.pose.position.z = 0.0;
+        marker.scale.x = 0.2; 
+        marker.scale.y = 0.2;
+        marker.scale.z = 0.4;
+        marker.color.a = 0.5f;
+        marker.color.r = 0.6f;
+        marker.color.g = 0.6f;
+        marker.color.b = 0.6f;
+        map_markers_.markers.push_back(marker);
+    }
     for (const auto &kv : verts_map) {
         auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
         if (v_landmark) {
