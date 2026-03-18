@@ -377,7 +377,7 @@ void GraphSLAM::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg)
             RCLCPP_INFO(this->get_logger(), "Skidpad map loaded with %zu vertices.", this->optimizer_.vertices().size());
         }
         if (this->current_mission_.data == lart_msgs::msg::Mission::ACCELERATION)
-            this->current_lap_ = 0;
+            this->current_lap_++ ;
     } else {
         RCLCPP_WARN(this->get_logger(), "Mission already set. Ignoring new mission message.");
     }
