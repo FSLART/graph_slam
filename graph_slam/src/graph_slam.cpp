@@ -99,10 +99,10 @@ GraphSLAM::~GraphSLAM()
         this->optimizer_.removeVertex(v_landmark);
     }
 
-    this->optimizer_.initializeOptimization();
-    const int iterations = this->optimizer_.optimize(10);
-    RCLCPP_INFO(this->get_logger(), "Graph optimization finished (%d iterations).", iterations);
-    this->optimizer_.save("optimized_graph.g2o");
+    // this->optimizer_.initializeOptimization();
+    // const int iterations = this->optimizer_.optimize(10);
+    // RCLCPP_INFO(this->get_logger(), "Graph optimization finished (%d iterations).", iterations);
+    this->optimizer_.save("post_processing_graph.g2o");
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
 }
