@@ -4,6 +4,7 @@
 #include "graph_slam/associationSolver.hpp"
 #include "graph_slam/types_graph_slam.h"
 #include "graph_slam/custom_types.hpp"
+#include "graph_slam/map_manager.hpp"
 
 #include "lart_common.h"
 #include "lart_msgs/msg/dynamics.hpp"
@@ -24,6 +25,8 @@
 
 #include <chrono>
 #include <map>
+#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <string>
 
 #include <g2o/core/sparse_optimizer.h>
 #include <g2o/core/optimization_algorithm_gauss_newton.h>
@@ -37,15 +40,17 @@
 
 
 #define ASSOCIATION_MODE 1
-#define CONES_TOPIC "/mapping/cones" // observations
+#define CONES_TOPIC "/mapping/cones" // observations  
 #define DYNAMICS_TOPIC "/acu_origin/dynamics" //rpm and all
 #define IMU_TOPIC "/imu/angular_velocity"
-#define MISSION_TOPIC "/mission"
+#define MISSION_TOPIC "/pc_origin/system_status/critical_as/mission"
 #define MAP_MARKERS_TOPIC "/slam/map/markers"
 #define MAP_TOPIC "/slam/map"
 #define POSE_TOPIC "/slam/pose"
 #define POSE_MARKER_TOPIC "/slam/pose_marker"
 #define STATS_TOPIC "/slam/stats"
+
+#define SKIDPAD_MAP "/maps/skidpad.yaml"
 
 
 
@@ -61,6 +66,7 @@ public:
     void mission_callback(const lart_msgs::msg::Mission::SharedPtr msg);
     std::tuple<double, double, double> compute_predicted_pose(float velocity, float omega_z);
     void update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset);
+    g2o::SparseOptimizer optimizer_;
 private:
     //Subscriptions
     rclcpp::Subscription<lart_msgs::msg::ConeArray>::SharedPtr observations_subscriber_;
@@ -85,7 +91,6 @@ private:
         }
     };
 
-    g2o::SparseOptimizer optimizer_;
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
     using SlamLinearSolver = g2o::LinearSolverEigen<SlamBlockSolver::PoseMatrixType>;
     long landmark_id_counter_ = -1;
@@ -127,7 +132,7 @@ private:
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
     void broadcast_transform();
-    void publish_map();
+    void publish_map(std::vector<graph_slam_types::Cone> cones = {});
 
     
 

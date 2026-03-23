@@ -8,9 +8,9 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 {
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been started.");
 
-    //this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
-    this->current_mission_.data = 6;
-    this->mission_set_ = true;
+    this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
+    // this->current_mission_.data = 6;
+    // this->mission_set_ = true;
 
     association_solver_ = new AssociationSolver(ASSOCIATION_MODE);
 
@@ -83,26 +83,8 @@ GraphSLAM::~GraphSLAM()
 {
     RCLCPP_INFO(this->get_logger(), "average processing time per ConeArray: %.3f ms", time_sum_ / observation_count_);
     this->optimizer_.save("final_graph.g2o");
-
-    const auto& verts = optimizer_.vertices();
-    std::vector<std::pair<int, VertexLandmark2D*>> landmarks_to_remove;
-    landmarks_to_remove.reserve(verts.size());
-    for (const auto& kv : verts) {
-        auto* v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
-        if (v_landmark && v_landmark->edges().size() < 4) {
-            landmarks_to_remove.emplace_back(kv.first, v_landmark);
-        }
-    }
-
-    for (const auto& item : landmarks_to_remove) {
-        VertexLandmark2D* v_landmark = item.second;
-        this->optimizer_.removeVertex(v_landmark);
-    }
-
-    // this->optimizer_.initializeOptimization();
-    // const int iterations = this->optimizer_.optimize(10);
-    // RCLCPP_INFO(this->get_logger(), "Graph optimization finished (%d iterations).", iterations);
-    this->optimizer_.save("post_processing_graph.g2o");
+    if(this->current_mission_.data == lart_msgs::msg::Mission::AUTOCROSS || this->current_mission_.data == lart_msgs::msg::Mission::TRACKDRIVE)
+        MapManager::save_map(this->current_mission_.data, this->optimizer_);
     delete association_solver_;
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
 }
@@ -137,7 +119,34 @@ void GraphSLAM::broadcast_transform()
     transformStamped.transform.rotation.w = q.w();
 
     tf_broadcaster_->sendTransform(transformStamped);
-    this->publish_map();
+    
+    geometry_msgs::msg::PoseStamped pose_msg;
+    pose_msg.header.stamp = this->get_clock()->now();
+    pose_msg.header.frame_id = "world";
+    pose_msg.pose.position.x = current_pose_[0];
+    pose_msg.pose.position.y = current_pose_[1];
+    pose_msg.pose.position.z = 0.0;
+    pose_msg.pose.orientation = tf2::toMsg(tf2::Quaternion(tf2::Vector3(0, 0, 1), current_pose_[2]));
+
+    this->pose_publisher_->publish(pose_msg);
+
+    visualization_msgs::msg::Marker pose_marker;
+    pose_marker.header.stamp = this->get_clock()->now();
+    pose_marker.header.frame_id = "world";
+    pose_marker.ns = "graph_slam";
+    pose_marker.id = 0;
+    pose_marker.type = visualization_msgs::msg::Marker::ARROW;
+    pose_marker.action = visualization_msgs::msg::Marker::ADD;
+    pose_marker.pose = pose_msg.pose;
+    pose_marker.scale.x = 1.7; // Arrow length
+    pose_marker.scale.y = 0.5; // Arrow width
+    pose_marker.scale.z = 0.2; // Arrow height
+    pose_marker.color.a = 1.0; // Fully opaque
+    pose_marker.color.r = 0.0f;
+    pose_marker.color.g = 1.0f;
+    pose_marker.color.b = 0.0f;
+
+    this->pose_marker_publisher_->publish(pose_marker);
 }
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
@@ -157,6 +166,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     const auto &verts = optimizer_.vertices();
     std::vector<graph_slam_types::Cone> map_cones_;
     std::vector<graph_slam_types::Cone> observations;
+    std::vector<graph_slam_types::Cone> not_added_observations;
     if (v_pose){
         for (const auto &kv : verts) {
             auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
@@ -172,7 +182,9 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
             g2o::EdgeSE2PointXY* most_recent_edge = nullptr;
             int max_pose_id = -1;
-
+            if (v_landmark->edges().empty()) {
+                continue; // Skip landmarks with no edges, as we have no information about their uncertainty
+            }
             for (auto* edge_base : v_landmark->edges()) {
                 // 1. Safely check the type
                 auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);
@@ -215,6 +227,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
         
         const auto matches = association_result.first;
         const auto obs_global = association_result.second;
+
     
         for (size_t i = 0; i < observations.size(); ++i){
             long landmark_id = -1;
@@ -222,8 +235,11 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             double y = observations[i].y;
             double d = std::sqrt(x*x + y*y);
 
-            if (d > 10 )
+            if (d > 10 ){
+                not_added_observations.push_back(obs_global[i]);
                 continue; // Skip observations that are too far away, likely outliers
+            }
+
 
             if (matches[i] != -1){
                 landmark_id= matches[i];
@@ -305,6 +321,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     stats_msg.cones_count_current = observations.size();
     stats_msg.lap_count = this->current_lap_;
     this->slam_stats_publisher_->publish(stats_msg);
+    this->publish_map(not_added_observations);
 }
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
@@ -338,34 +355,6 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
 
 
-    geometry_msgs::msg::PoseStamped pose_msg;
-    pose_msg.header.stamp = this->get_clock()->now();
-    pose_msg.header.frame_id = "world";
-    pose_msg.pose.position.x = current_pose_[0];
-    pose_msg.pose.position.y = current_pose_[1];
-    pose_msg.pose.position.z = 0.0;
-    pose_msg.pose.orientation = tf2::toMsg(tf2::Quaternion(tf2::Vector3(0, 0, 1), current_pose_[2]));
-
-    this->pose_publisher_->publish(pose_msg);
-
-    visualization_msgs::msg::Marker pose_marker;
-    pose_marker.header.stamp = this->get_clock()->now();
-    pose_marker.header.frame_id = "world";
-    pose_marker.ns = "graph_slam";
-    pose_marker.id = 0;
-    pose_marker.type = visualization_msgs::msg::Marker::ARROW;
-    pose_marker.action = visualization_msgs::msg::Marker::ADD;
-    pose_marker.pose = pose_msg.pose;
-    pose_marker.scale.x = 1.7; // Arrow length
-    pose_marker.scale.y = 0.5; // Arrow width
-    pose_marker.scale.z = 0.2; // Arrow height
-    pose_marker.color.a = 1.0; // Fully opaque
-    pose_marker.color.r = 0.0f;
-    pose_marker.color.g = 1.0f;
-    pose_marker.color.b = 0.0f;
-
-    this->pose_marker_publisher_->publish(pose_marker);
-
     RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
 }
 
@@ -381,6 +370,14 @@ void GraphSLAM::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg)
         this->current_mission_.data = msg->data;
         mission_set_ = true;
         RCLCPP_INFO(this->get_logger(), "Mission set to %d", this->current_mission_.data);
+        if (this->current_mission_.data == lart_msgs::msg::Mission::SKIDPAD) {
+            std::string package_share_dir = ament_index_cpp::get_package_share_directory("graph_slam");
+            std::string map_path = package_share_dir + SKIDPAD_MAP;
+            landmark_id_counter_ = MapManager::load_map(map_path, this->optimizer_);
+            RCLCPP_INFO(this->get_logger(), "Skidpad map loaded with %zu vertices.", this->optimizer_.vertices().size());
+        }
+        if (this->current_mission_.data == lart_msgs::msg::Mission::ACCELERATION)
+            this->current_lap_++ ;
     } else {
         RCLCPP_WARN(this->get_logger(), "Mission already set. Ignoring new mission message.");
     }
@@ -431,7 +428,7 @@ void GraphSLAM::check_lap_completion()
         return; // you ain't got no motion
     }
 
-    if (this->current_lap_distance_ == 1){
+    if (this->current_lap_ == 1){
         this->localization_mode_ = true;
     }
 
@@ -464,7 +461,20 @@ void GraphSLAM::check_lap_completion()
         this->current_lap_++;
         this->current_lap_distance_ = 0.0; // Reset distance for the next lap
         if (this->current_lap_ == 1) {
-            // TODO: call full optimization after the first lap is completed
+            const auto& verts = optimizer_.vertices();
+            std::vector<std::pair<int, VertexLandmark2D*>> landmarks_to_remove;
+            landmarks_to_remove.reserve(verts.size());
+            for (const auto& kv : verts) {
+                auto* v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
+                if (v_landmark && v_landmark->edges().size() < 4) {
+                    landmarks_to_remove.emplace_back(kv.first, v_landmark);
+                }
+            }
+
+            for (const auto& item : landmarks_to_remove) {
+                VertexLandmark2D* v_landmark = item.second;
+                this->optimizer_.removeVertex(v_landmark);
+            }
         }
     }
 }
@@ -509,18 +519,48 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
 
 }
 
-void GraphSLAM::publish_map()
+void GraphSLAM::publish_map(std::vector<graph_slam_types::Cone> not_in_map_observations)
 {
     const auto &verts_map = optimizer_.vertices();
     visualization_msgs::msg::MarkerArray map_markers_;
     lart_msgs::msg::ConeArray map_cones_msg;
+    int id_counter = 1000;
+    for (const auto& cone : not_in_map_observations) {
+        lart_msgs::msg::Cone cone_msg;
+        cone_msg.position.x = cone.x;
+        cone_msg.position.y = cone.y;
+        cone_msg.class_type.data = cone.type;
+        cone_msg.cone_id.data = -1; // Indicate that this is an unmatched observation
+        map_cones_msg.cones.push_back(cone_msg);
+        visualization_msgs::msg::Marker marker;
+        marker.header.stamp = this->get_clock()->now();
+        marker.header.frame_id = "world";
+        marker.id = id_counter++; // Unique ID for each marker
+        marker.ns = "graph_slam";
+        marker.type = visualization_msgs::msg::Marker::SPHERE;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.lifetime = rclcpp::Duration(0, 400000000); // Marker will last for 0.5 seconds
+        marker.pose.position.x = cone.x;
+        marker.pose.position.y = cone.y;
+        marker.pose.position.z = 0.0;
+        marker.scale.x = 0.2; 
+        marker.scale.y = 0.2;
+        marker.scale.z = 0.4;
+        marker.color.a = 0.5f;
+        marker.color.r = 0.6f;
+        marker.color.g = 0.6f;
+        marker.color.b = 0.6f;
+        map_markers_.markers.push_back(marker);
+    }
     for (const auto &kv : verts_map) {
         auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
         if (v_landmark) {
             const Eigen::Vector2d &est = v_landmark->estimate();
             g2o::EdgeSE2PointXY* most_recent_edge = nullptr;
             int max_pose_id = -1;
-
+            if (v_landmark->edges().empty()) {
+                continue; // Skip landmarks with no edges, as we have no information about their uncertainty
+            }
             for (auto* edge_base : v_landmark->edges()) {
                 // 1. Safely check the type
                 auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);

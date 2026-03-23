@@ -17,16 +17,20 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(yaml-cpp REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 
 add_executable(graph_slam_node
   src/graph_slam.cpp
   src/associationSolver.cpp
   src/types_graph_slam.cpp
+  src/map_manager.cpp
 )
 
 target_include_directories(graph_slam_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
+  ${YAML_CPP_INCLUDE_DIRS}
 )
 
 include_directories(
@@ -43,6 +47,7 @@ ament_target_dependencies(graph_slam_node
   tf2_ros
   tf2_geometry_msgs
   visualization_msgs
+  yaml-cpp
 )
 
 target_link_libraries(graph_slam_node
@@ -52,6 +57,8 @@ target_link_libraries(graph_slam_node
   g2o_solver_eigen
   g2o_stuff
   ${PCL_LIBRARIES}
+  ${YAML_CPP_LIBRARIES}
+  ament_index_cpp::ament_index_cpp
 )
 
 install(TARGETS
@@ -65,6 +72,11 @@ install(DIRECTORY include/
 
 install(DIRECTORY ../launch/
   DESTINATION share/${PROJECT_NAME}/launch
+)
+
+install(DIRECTORY
+  ${PROJECT_SOURCE_DIR}/../maps/
+  DESTINATION share/${PROJECT_NAME}/maps
 )
 
 if(BUILD_TESTING)
