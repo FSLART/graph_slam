@@ -104,12 +104,6 @@ private:
     g2o::HyperGraph::VertexSet new_vertices;
     g2o::HyperGraph::EdgeSet   new_edges;
 
-    const double base_depth_uncertainty_ = 0.1; // Base longitudinal uncertainty in meters
-    const double base_lateral_uncertainty_ = 0.05; // Base lateral uncertainty in meters
-    const double k_depth = 0.0012;  //longitudinal uncertainty
-    const double k_lateral = 0.04; //lateral uncertainty
-    const double depth_weight = 1.5; //exponential weight for depth uncertainty
-
     // Stats variables
     long frame_count_ = 0;
     long observation_count_ = 0;

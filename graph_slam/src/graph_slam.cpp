@@ -8,9 +8,9 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 {
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been started.");
 
-    this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
-    // this->current_mission_.data = 6;
-    // this->mission_set_ = true;
+    // this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
+    this->current_mission_.data = 6;
+    this->mission_set_ = true;
 
     association_solver_ = new AssociationSolver(ASSOCIATION_MODE);
 
@@ -259,33 +259,14 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
                 RCLCPP_DEBUG(this->get_logger(), "Observation %zu is a new cone.", i);
             }
     
-            Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
-    
-    
-            double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
-            double sigma_y = k_lateral * d + base_lateral_uncertainty_;
-    
-            // information(0, 0) = (1.0 / (sigma_x * sigma_x))/2; // Inverse of sigma_x^2
-            // information(1, 1) = (1.0 / (sigma_y * sigma_y))/2; // Inverse of sigma_y^2
-
-            //Testing if this works
-            double info_x = 1.0 / (sigma_x * sigma_x);
-            double info_y = 1.0 / (sigma_y * sigma_y);
-
-            info_x = std::max(info_x, 1e-6);
-            info_y = std::max(info_y, 1e-6);
-
-            information(0,0) = info_x;
-            information(1,1) = info_y;
-    
-    
             EdgeSE2PointXY* edge = new EdgeSE2PointXY();
             edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
             edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id)));
             edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
 
             // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
-            edge->setInformation(information); // Use the computed information matrix
+            observations[i].calculate_information();
+            edge->setInformation(observations[i].information); // Use the computed information matrix
 
             // Add robust kernel hereinitialized_once
             auto rk = new RobustKernelHuber();
