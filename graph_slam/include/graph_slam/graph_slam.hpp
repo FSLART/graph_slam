@@ -52,6 +52,8 @@
 
 #define SKIDPAD_MAP "/maps/skidpad.yaml"
 
+#define ONLINE_FLAG true
+
 
 
 class GraphSLAM : public rclcpp::Node

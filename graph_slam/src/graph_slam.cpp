@@ -276,7 +276,9 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             this->optimizer_.addEdge(edge);
             this->new_edges.insert(edge); // Add new edge for update bookkeeping
         }
-        update_graph(this->new_vertices, this->new_edges);
+        if (ONLINE_FLAG){
+            update_graph(this->new_vertices, this->new_edges);
+        }
 
     }else {
         RCLCPP_WARN(this->get_logger(), "Current pose vertex not found in the graph. Probably no pose initialized.");
@@ -307,6 +309,10 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
 
 void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
 {
+    if (msg->rpm == 0 && !this->is_robot_moving_){
+        return;
+    }
+
     is_robot_moving_ = true; // Update the robot's moving status
     if (frame_count_ % 5 != 0) {
         frame_count_++;
