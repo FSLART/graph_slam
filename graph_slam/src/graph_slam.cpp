@@ -8,6 +8,12 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
 {
     RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been started.");
 
+    #ifdef __LART_T24__
+        RCLCPP_WARN(this->get_logger(), "Running on T24 hardware.");
+    #else
+        RCLCPP_WARN(this->get_logger(), "Running on T26 hardware");
+    #endif
+
     // this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
     this->current_mission_.data = 6;
     this->mission_set_ = true;
@@ -337,7 +343,7 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     odom_edge->setVertex(0, current_pose_vertex);
     odom_edge->setVertex(1, new_pose_vertex);
     odom_edge->setMeasurement(SE2(get<0>(deltas), get<1>(deltas), get<2>(deltas)));
-    odom_edge->setInformation(Eigen::Matrix3d::Identity()*80);
+    odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
     optimizer_.addEdge(odom_edge);
     this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
 

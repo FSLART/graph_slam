@@ -15,33 +15,30 @@ struct Cone
   void calculate_information(){
     const double base_depth_uncertainty_ = 0.1; // Base longitudinal uncertainty in meters
     const double base_lateral_uncertainty_ = 0.05; // Base lateral uncertainty in meters
-    const double k_depth = 0.0012;  //longitudinal uncertainty
-    const double k_lateral = 0.04; //lateral uncertainty
+    const double k_depth = 0.03;  //longitudinal uncertainty
+    const double k_lateral = 0.02; //lateral uncertainty
     const double depth_weight = 1.5; //exponential weight for depth uncertainty
     double d = std::sqrt(x*x + y*y);
 
-    Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
+    double sigma_depth = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
+    double sigma_lat   = k_lateral * std::pow(d, 1.15) + base_lateral_uncertainty_;
 
-    double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
-    double sigma_y = k_lateral * d + base_lateral_uncertainty_;
+    // 2. Convert to Covariance (Variance)
+    double var_depth = sigma_depth * sigma_depth;
+    double var_lat   = sigma_lat * sigma_lat;
 
-    // information(0, 0) = (1.0 / (sigma_x * sigma_x))/2; // Inverse of sigma_x^2
-    // information(1, 1) = (1.0 / (sigma_y * sigma_y))/2; // Inverse of sigma_y^2
+    // 3. Construct Information Matrix
+    // If x and y are in the sensor's local polar frame:
+    Eigen::Matrix2d obs_cov = Eigen::Matrix2d::Zero();
+    obs_cov(0,0) = var_depth; 
+    obs_cov(1,1) = var_lat;
 
-    //Testing if this works
-    double info_x = 1.0 / (sigma_x * sigma_x);
-    double info_y = 1.0 / (sigma_y * sigma_y);
-
-    info_x = std::max(info_x, 1e-6);
-    info_y = std::max(info_y, 1e-6);
-
-    information(0,0) = info_x;
-    information(1,1) = info_y;
-
-    this->information = information;
+    // 4. Invert to get Information
+    // .inverse() is safe here because variances are clamped/positive
+    this->information = obs_cov.inverse();
   }
 };
 
-}  // namespace graph_slam
+}  // namespace graph_slam_types
 
 #endif  // CUSTOM_TYPES_HPP_
