@@ -118,7 +118,7 @@ private:
     bool mission_set_ = false;
     int16_t current_lap_ = -1;
     double current_lap_distance_ = 0.0;
-    float lap_margin_x_ = 1.0;
+    float lap_margin_x_ = 0.5;
     float lap_margin_y_ = 3.0;
     float lap_margin_ = 10.0;
     void check_lap_completion();

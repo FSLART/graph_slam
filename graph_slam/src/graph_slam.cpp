@@ -454,6 +454,8 @@ void GraphSLAM::check_lap_completion()
         this->current_lap_++;
         this->current_lap_distance_ = 0.0; // Reset distance for the next lap
         if (this->current_lap_ == 1) {
+            this->new_vertices.clear();
+            this->new_edges.clear();
             const auto& verts = optimizer_.vertices();
             std::vector<std::pair<int, VertexLandmark2D*>> landmarks_to_remove;
             landmarks_to_remove.reserve(verts.size());
