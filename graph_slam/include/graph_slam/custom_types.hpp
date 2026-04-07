@@ -12,7 +12,7 @@ struct Cone
   float y{0.0f};
   int type{0};
   Eigen::Matrix2d information{Eigen::Matrix2d::Identity()};
-  void calculate_information(){
+  void calculate_information(double theta){
     const double base_depth_uncertainty_ = 0.1; // Base longitudinal uncertainty in meters
     const double base_lateral_uncertainty_ = 0.05; // Base lateral uncertainty in meters
     const double k_depth = 0.03;  //longitudinal uncertainty
@@ -20,22 +20,28 @@ struct Cone
     const double depth_weight = 1.5; //exponential weight for depth uncertainty
     double d = std::sqrt(x*x + y*y);
 
-    Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
+    // Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
 
     double sigma_x = k_depth * std::pow(d, depth_weight) + base_depth_uncertainty_;
     double sigma_y = k_lateral * std::pow(d, 1.15) + base_lateral_uncertainty_;
 
-    //Testing if this works
-    double info_x = 1.0 / (sigma_x * sigma_x);
-    double info_y = 1.0 / (sigma_y * sigma_y);
+    double v_d = sigma_x * sigma_x;
+    double v_l = sigma_y * sigma_y;
 
-    info_x = std::max(info_x, 1e-6);
-    info_y = std::max(info_y, 1e-6);
+    // 2. Get robot heading (theta) from the pose the edge originates from
+    double c = cos(theta);
+    double s = sin(theta);
 
-    information(0,0) = info_x;
-    information(1,1) = info_y;
+    // 3. Rotate Covariance: R * Sigma_local * R^T
+    double cov_xx = c * c * v_d + s * s * v_l;
+    double cov_yy = s * s * v_d + c * c * v_l;
+    double cov_xy = c * s * (v_d - v_l);
 
-    this->information = information;
+    Eigen::Matrix2d global_cov;
+    global_cov << cov_xx, cov_xy,
+                  cov_xy, cov_yy;
+
+    this->information = global_cov.inverse();
 
   }
 };

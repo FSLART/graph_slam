@@ -157,8 +157,17 @@ void GraphSLAM::broadcast_transform()
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
 {
+    std::vector<graph_slam_types::Cone> not_added_observations;
     if(!is_robot_moving_){
         RCLCPP_DEBUG(this->get_logger(), "Robot is stationary. Skipping ConeArray processing.");
+        for (const auto& cone_msg : msg->cones) {
+            graph_slam_types::Cone cone;
+            cone.x = cone_msg.position.x;
+            cone.y = cone_msg.position.y;
+            cone.type = cone_msg.class_type.data;
+            not_added_observations.push_back(cone);
+        }
+        this->publish_map(not_added_observations);
         return; // Skip processing if the robot is not moving
     }
     auto start_time = std::chrono::steady_clock::now();
@@ -172,7 +181,6 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     const auto &verts = optimizer_.vertices();
     std::vector<graph_slam_types::Cone> map_cones_;
     std::vector<graph_slam_types::Cone> observations;
-    std::vector<graph_slam_types::Cone> not_added_observations;
     if (v_pose){
         for (const auto &kv : verts) {
             auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
@@ -271,7 +279,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
 
             // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
-            observations[i].calculate_information();
+            observations[i].calculate_information(robot_pose_[2]);
             edge->setInformation(observations[i].information); // Use the computed information matrix
 
             // Add robust kernel hereinitialized_once
@@ -327,6 +335,7 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     frame_count_ ++;
     float current_rpm = (float)msg->rpm;
     float ms_speed = RPM_TO_MS(current_rpm);
+    RCLCPP_INFO(this->get_logger(), "Received Dynamics message: RPM=%d, Speed=%.2f m/s", msg->rpm, ms_speed);
     this->velocity_ = ms_speed;
 
     tuple<double, double, double> deltas = this->compute_predicted_pose(this->velocity_, this->angular_velocity_); // Assuming velocity is 0 for prediction, can be replaced with actual velocity if available
