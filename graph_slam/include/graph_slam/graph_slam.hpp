@@ -84,14 +84,6 @@ private:
 
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
 
-    struct GridPos {
-        float x, y;
-        bool operator<(const GridPos& other) const {
-            if (x != other.x) return x < other.x;
-            return y < other.y;
-        }
-    };
-
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
     using SlamLinearSolver = g2o::LinearSolverEigen<SlamBlockSolver::PoseMatrixType>;
     long landmark_id_counter_ = -1;
