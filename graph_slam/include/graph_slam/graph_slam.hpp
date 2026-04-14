@@ -92,6 +92,9 @@ private:
     float velocity_ = 0.0;
     std::chrono::steady_clock::time_point last_predict_time_{};
     Eigen::Vector3d current_pose_{0.0, 0.0, 0.0}; // x, y, theta
+    std::mutex pose_mutex_;
+    std::mutex pose_id_mutex_;
+    std::mutex optimizer_mutex_;
 
     // Bookkeeping for new vertices and edges in each optimization step
     g2o::HyperGraph::VertexSet new_vertices;
