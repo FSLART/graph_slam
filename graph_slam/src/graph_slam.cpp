@@ -46,7 +46,6 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     map_publisher_ = this->create_publisher<lart_msgs::msg::ConeArray>(MAP_TOPIC, 10);
 
     pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(POSE_TOPIC, 10);
-    pose_marker_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>(POSE_MARKER_TOPIC, 10);
     
     auto linearSolver = std::make_unique<SlamLinearSolver>();
 
@@ -135,24 +134,6 @@ void GraphSLAM::broadcast_transform()
     pose_msg.pose.orientation = tf2::toMsg(tf2::Quaternion(tf2::Vector3(0, 0, 1), current_pose_[2]));
 
     this->pose_publisher_->publish(pose_msg);
-
-    visualization_msgs::msg::Marker pose_marker;
-    pose_marker.header.stamp = this->get_clock()->now();
-    pose_marker.header.frame_id = "world";
-    pose_marker.ns = "graph_slam";
-    pose_marker.id = 0;
-    pose_marker.type = visualization_msgs::msg::Marker::ARROW;
-    pose_marker.action = visualization_msgs::msg::Marker::ADD;
-    pose_marker.pose = pose_msg.pose;
-    pose_marker.scale.x = 1.7; // Arrow length
-    pose_marker.scale.y = 0.5; // Arrow width
-    pose_marker.scale.z = 0.2; // Arrow height
-    pose_marker.color.a = 1.0; // Fully opaque
-    pose_marker.color.r = 0.0f;
-    pose_marker.color.g = 1.0f;
-    pose_marker.color.b = 0.0f;
-
-    this->pose_marker_publisher_->publish(pose_marker);
 }
 
 void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)

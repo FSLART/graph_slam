@@ -49,7 +49,9 @@ void MapManager::save_map(const int mission, SparseOptimizer& optimizer_)
     std::string package_name = "graph_slam"; // Change to your actual package name
     std::string package_share_directory = ament_index_cpp::get_package_share_directory(package_name);
     
-    std::filesystem::path maps_dir = std::filesystem::path(package_share_directory) / "maps";
+    std::filesystem::path maps_dir = std::filesystem::path(package_share_directory).parent_path().parent_path().parent_path().parent_path() / "src" / "graph_slam" / "maps";
+
+    RCLCPP_INFO(rclcpp::get_logger("MapManager"), "Saving map to directory: %s", maps_dir.c_str());
 
     if (!std::filesystem::exists(maps_dir)) {
         std::filesystem::create_directories(maps_dir);
@@ -76,6 +78,10 @@ void MapManager::save_map(const int mission, SparseOptimizer& optimizer_)
     // Version
     out << YAML::Key << "version";
     out << YAML::Value << "1.0";
+
+    //lanes connected
+    out << YAML::Key << "lanesFirstWithLastConnected";
+    out << YAML::Value << "true";
 
     // Start Section
     out << YAML::Key << "start";

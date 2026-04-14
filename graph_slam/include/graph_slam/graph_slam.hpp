@@ -40,7 +40,7 @@
 
 
 #define ASSOCIATION_MODE 1
-#define CONES_TOPIC "/mapping/cones" // observations  
+#define CONES_TOPIC "/mapping/cones" // observations
 #define DYNAMICS_TOPIC "/acu_origin/dynamics" //rpm and all
 #define IMU_TOPIC "/imu/angular_velocity"
 #define MISSION_TOPIC "/pc_origin/system_status/critical_as/mission"
@@ -50,7 +50,7 @@
 #define POSE_MARKER_TOPIC "/slam/pose_marker"
 #define STATS_TOPIC "/slam/stats"
 
-#define SKIDPAD_MAP "/maps/skidpad.yaml"
+#define SKIDPAD_MAP "/maps/skidpad.yaml.default"
 
 #define ONLINE_FLAG true
 
@@ -83,7 +83,6 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr map_markers_publisher_;
 
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pose_marker_publisher_;
 
     struct GridPos {
         float x, y;
