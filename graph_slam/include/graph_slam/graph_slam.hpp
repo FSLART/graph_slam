@@ -29,7 +29,6 @@
 #include <string>
 
 #include <g2o/core/sparse_optimizer.h>
-#include <g2o/core/optimization_algorithm_gauss_newton.h>
 #include <g2o/core/optimization_algorithm_levenberg.h>
 #include <g2o/core/block_solver.h>
 #include <g2o/core/sparse_optimizer_terminate_action.h>
@@ -40,15 +39,7 @@
 
 
 #define ASSOCIATION_MODE 1
-#define CONES_TOPIC "/mapping/cones" // observations
-#define DYNAMICS_TOPIC "/acu_origin/dynamics" //rpm and all
-#define IMU_TOPIC "/imu/angular_velocity"
-#define MISSION_TOPIC "/pc_origin/system_status/critical_as/mission"
-#define MAP_MARKERS_TOPIC "/slam/map/markers"
-#define MAP_TOPIC "/slam/map"
-#define POSE_TOPIC "/slam/pose"
-#define POSE_MARKER_TOPIC "/slam/pose_marker"
-#define STATS_TOPIC "/slam/stats"
+
 
 #define SKIDPAD_MAP "/maps/skidpad.yaml.default"
 
@@ -56,34 +47,23 @@
 
 
 
-class GraphSLAM : public rclcpp::Node
+class GraphSLAM
 {
 public:
     GraphSLAM();
     ~GraphSLAM();
 
-    void observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg);
-    void dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg);
-    void imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
-    void mission_callback(const lart_msgs::msg::Mission::SharedPtr msg);
+    visualization_msgs::msg::MarkerArray process_observations(const lart_msgs::msg::ConeArray::SharedPtr msg);
+    void process_dynamics(const lart_msgs::msg::Dynamics::SharedPtr msg);
+    void set_angular_velocity(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
+    void set_mission(const lart_msgs::msg::Mission::SharedPtr msg);
     std::tuple<double, double, double> compute_predicted_pose(float velocity, float omega_z);
     void update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset);
     g2o::SparseOptimizer optimizer_;
+    Eigen::Vector3d get_current_pose();
+    int get_lap();
 private:
-    //Subscriptions
-    rclcpp::Subscription<lart_msgs::msg::ConeArray>::SharedPtr observations_subscriber_;
-    rclcpp::Subscription<lart_msgs::msg::Dynamics>::SharedPtr dynamics_subscriber_;
-    rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr imu_subscriber_;
-    rclcpp::Subscription<lart_msgs::msg::Mission>::SharedPtr mission_subscriber_;
     
-    //Publishers
-    rclcpp::Publisher<lart_msgs::msg::SlamStats>::SharedPtr slam_stats_publisher_;
-
-    rclcpp::Publisher<lart_msgs::msg::ConeArray>::SharedPtr map_publisher_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr map_markers_publisher_;
-
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
-
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
     using SlamLinearSolver = g2o::LinearSolverEigen<SlamBlockSolver::PoseMatrixType>;
     long landmark_id_counter_ = -1;
@@ -119,12 +99,7 @@ private:
 
     bool localization_mode_ = false;
     
-    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    rclcpp::TimerBase::SharedPtr timer_;
-    void broadcast_transform();
-    void publish_map(std::vector<graph_slam_types::Cone> cones = {});
-
-    
+    visualization_msgs::msg::MarkerArray get_map(std::vector<graph_slam_types::Cone> cones = {});
 
 protected:
     AssociationSolver *association_solver_;

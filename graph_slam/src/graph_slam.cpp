@@ -4,65 +4,17 @@ using std::placeholders::_1;
 using namespace g2o;
 using namespace std;
 
-GraphSLAM::GraphSLAM() : Node("graph_slam_node")
+GraphSLAM::GraphSLAM()
 {
-    RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been started.");
-
-    #ifdef __LART_T24__
-        RCLCPP_WARN(this->get_logger(), "Running on T24 hardware.");
-    #else
-        RCLCPP_WARN(this->get_logger(), "Running on T26 hardware");
-    #endif
-
     // this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
     this->current_mission_.data = 6;
     this->mission_set_ = true;
 
     association_solver_ = new AssociationSolver(ASSOCIATION_MODE);
 
-    auto observations_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-    auto other_callbacks_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-
-    rclcpp::SubscriptionOptions obs_options;
-    obs_options.callback_group = observations_callback_group;
-
-    rclcpp::SubscriptionOptions other_options;
-    other_options.callback_group = other_callbacks_group;
-
-    // Subscribe to the cone observations topic
-    observations_subscriber_ = this->create_subscription<lart_msgs::msg::ConeArray>(
-        CONES_TOPIC, 10,
-        bind(&GraphSLAM::observations_callback, this, _1), obs_options);
-
-    // Subscribe to the dynamics topic
-    dynamics_subscriber_ = this->create_subscription<lart_msgs::msg::Dynamics>(
-        DYNAMICS_TOPIC, 10,
-        bind(&GraphSLAM::dynamics_callback, this, _1), other_options);
-
-    //Subscribe to angular velocity topic 
-    imu_subscriber_ = this->create_subscription<geometry_msgs::msg::Vector3Stamped>(
-        IMU_TOPIC, 10,
-        bind(&GraphSLAM::imu_callback, this, _1), other_options);
-
-    mission_subscriber_ = this->create_subscription<lart_msgs::msg::Mission>(
-        MISSION_TOPIC, 10,
-        bind(&GraphSLAM::mission_callback, this, _1), other_options);
-
-    slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>(STATS_TOPIC, 10);
-    
-    map_markers_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(MAP_MARKERS_TOPIC, 10);
-
-    map_publisher_ = this->create_publisher<lart_msgs::msg::ConeArray>(MAP_TOPIC, 10);
-
-    pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(POSE_TOPIC, 10);
-    
     auto linearSolver = std::make_unique<SlamLinearSolver>();
 
-    // OptimizationAlgorithmGaussNewton* solver =
-    //   new OptimizationAlgorithmGaussNewton(
-    //       std::make_unique<SlamBlockSolver>(move(linearSolver)));
-
-    auto solver = new OptimizationAlgorithmLevenberg(
+    OptimizationAlgorithmLevenberg* solver = new OptimizationAlgorithmLevenberg(
     std::make_unique<SlamBlockSolver>(std::move(linearSolver)));
     
     optimizer_.setAlgorithm(solver);
@@ -85,90 +37,29 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     
     // Enable verbose output for debugging
     optimizer_.setVerbose(true);
-    
-    tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-    
-    std::thread broadcast_transform_thread ([this]() {
-        rclcpp::Rate rate(50);
-        while (rclcpp::ok()) {
-            this->broadcast_transform();
-            rate.sleep();
-        }
-    });
-    broadcast_transform_thread.detach();
-
-
-    // timer_ = this->create_wall_timer(
-    //   std::chrono::milliseconds(10),
-    //   std::bind(&GraphSLAM::broadcast_transform, this));
 }
 
 GraphSLAM::~GraphSLAM()
 {
-    RCLCPP_INFO(this->get_logger(), "average processing time per ConeArray: %.3f ms", time_sum_ / observation_count_);
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "average processing time per ConeArray: %.3f ms", time_sum_ / observation_count_);
     this->optimizer_.save("final_graph.g2o");
     if(this->current_mission_.data == lart_msgs::msg::Mission::AUTOCROSS || this->current_mission_.data == lart_msgs::msg::Mission::TRACKDRIVE)
         MapManager::save_map(this->current_mission_.data, this->optimizer_);
     delete association_solver_;
-    RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been terminated.");
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "GraphSLAM node has been terminated.");
 }
 
-void GraphSLAM::broadcast_transform()
+Eigen::Vector3d GraphSLAM::get_current_pose()
 {
-    if (optimizer_.vertices().empty()) {
-        return; // No vertices in the graph, skip broadcasting
-    }
-    VertexSE2* current_pose_vertex;
-    {
-        std::lock_guard<std::mutex> lock(pose_id_mutex_);
-        current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
-    }
-    if (!current_pose_vertex) {
-        RCLCPP_WARN(this->get_logger(), "Current pose vertex not found in the graph. Cannot broadcast transform.");
-        return;
-    }
-    SE2 pose_estimate;
-    {
-        std::lock_guard<std::mutex> lock(optimizer_mutex_);
-        pose_estimate = current_pose_vertex->estimate();
-    }
-    
-    geometry_msgs::msg::TransformStamped transformStamped;
-    transformStamped.header.stamp = this->get_clock()->now();
-    transformStamped.header.frame_id = "world";
-    transformStamped.child_frame_id = "base_footprint";
-    transformStamped.transform.translation.x = pose_estimate.translation()[0];
-    transformStamped.transform.translation.y = pose_estimate.translation()[1];
-    transformStamped.transform.translation.z = 0.0;
-
-    tf2::Quaternion q;
-    q.setRPY(0, 0, pose_estimate.rotation().angle());
-    transformStamped.transform.rotation.x = q.x();
-    transformStamped.transform.rotation.y = q.y();
-    transformStamped.transform.rotation.z = q.z();
-    transformStamped.transform.rotation.w = q.w();
-
-    tf_broadcaster_->sendTransform(transformStamped);
-    
-    geometry_msgs::msg::PoseStamped pose_msg;
-    {
-        std::lock_guard<std::mutex> lock(pose_mutex_);
-        pose_msg.header.stamp = this->get_clock()->now();
-        pose_msg.header.frame_id = "world";
-        pose_msg.pose.position.x = current_pose_[0];
-        pose_msg.pose.position.y = current_pose_[1];
-        pose_msg.pose.position.z = 0.0;
-        pose_msg.pose.orientation = tf2::toMsg(tf2::Quaternion(tf2::Vector3(0, 0, 1), current_pose_[2]));
-    }
-
-    this->pose_publisher_->publish(pose_msg);
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    return current_pose_;
 }
 
-void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg)
+visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_msgs::msg::ConeArray::SharedPtr msg)
 {
     std::vector<graph_slam_types::Cone> not_added_observations;
     if(!is_robot_moving_){
-        RCLCPP_DEBUG(this->get_logger(), "Robot is stationary. Skipping ConeArray processing.");
+        RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Robot is stationary. Skipping ConeArray processing.");
         for (const auto& cone_msg : msg->cones) {
             graph_slam_types::Cone cone;
             cone.x = cone_msg.position.x;
@@ -176,12 +67,11 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             cone.type = cone_msg.class_type.data;
             not_added_observations.push_back(cone);
         }
-        this->publish_map(not_added_observations);
-        return; // Skip processing if the robot is not moving
+        return this->get_map(not_added_observations); // Skip processing if the robot is not moving
     }
     
     auto start_time = std::chrono::steady_clock::now();
-    RCLCPP_DEBUG(this->get_logger(), "Received ConeArray with %zu cones.", msg->cones.size());
+    RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received ConeArray with %zu cones.", msg->cones.size());
     this->observation_count_++;
 
     // TODO : replace placeholders with real values
@@ -275,7 +165,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
                 landmark_id= matches[i];
     
                 // dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(landmark_id))->setEstimate(Eigen::Vector2d(obs_global[i].x, obs_global[i].y));
-                RCLCPP_DEBUG(this->get_logger(), "Observation %zu associated with map cone %d.", i, matches[i]);
+                RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Observation %zu associated with map cone %d.", i, matches[i]);
             } else {
                 VertexLandmark2D* landmark = new VertexLandmark2D();
                 landmark->setId(++landmark_id_counter_);
@@ -289,7 +179,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     
                 landmark_id = landmark_id_counter_;
     
-                RCLCPP_DEBUG(this->get_logger(), "Observation %zu is a new cone.", i);
+                RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Observation %zu is a new cone.", i);
             }
     
             EdgeSE2PointXY* edge = new EdgeSE2PointXY();
@@ -301,7 +191,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             }
             edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
 
-            // RCLCPP_INFO(this->get_logger(), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
+            // RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
             observations[i].calculate_information(robot_pose_[2]);
             edge->setInformation(observations[i].information); // Use the computed information matrix
 
@@ -322,33 +212,18 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
         }
 
     }else {
-        RCLCPP_WARN(this->get_logger(), "Current pose vertex not found in the graph. Probably no pose initialized.");
+        RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Current pose vertex not found in the graph. Probably no pose initialized.");
     }
-
-    // //print all landmarks in the graph
-    // RCLCPP_INFO(this->get_logger(), "Current landmarks in the graph:");
-    // for (const auto &kv : verts) {
-    //     auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
-    //     if (v_landmark) {
-    //         const Eigen::Vector2d &est = v_landmark->estimate();
-    //         RCLCPP_INFO(this->get_logger(), "Landmark ID: %d, Position: (%.2f, %.2f), Color: %d", v_landmark->id(), est[0], est[1], v_landmark->color());
-    //     }
-    // }
     auto end_time = std::chrono::steady_clock::now();
     auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
     time_sum_ += duration_ms;
-    RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %.3f ms.", duration_ms);
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Processing ConeArray took %.3f ms.", duration_ms);
     this->check_lap_completion();
-    RCLCPP_INFO(this->get_logger(), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
-    lart_msgs::msg::SlamStats stats_msg;
-    stats_msg.cones_count_all = map_cones_.size();
-    stats_msg.cones_count_current = observations.size();
-    stats_msg.lap_count = this->current_lap_;
-    this->slam_stats_publisher_->publish(stats_msg);
-    this->publish_map(not_added_observations);
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
+    return this->get_map(not_added_observations);
 }
 
-void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
+void GraphSLAM::process_dynamics(const lart_msgs::msg::Dynamics::SharedPtr msg)
 {
     if (msg->rpm == 0 && !this->is_robot_moving_){
         return;
@@ -386,34 +261,34 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     }
         
         
-    RCLCPP_DEBUG(this->get_logger(), "Received Dynamics message: %f", ms_speed);
+    RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received Dynamics message: %f", ms_speed);
 }
 
-void GraphSLAM::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg)
+void GraphSLAM::set_angular_velocity(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg)
 {
     this->angular_velocity_ = msg->vector.z;
-    RCLCPP_DEBUG(this->get_logger(), "Received IMU angular velocity message: %f", this->angular_velocity_);
+    RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received IMU angular velocity message: %f", this->angular_velocity_);
 }
 
-void GraphSLAM::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg)
+void GraphSLAM::set_mission(const lart_msgs::msg::Mission::SharedPtr msg)
 {
     if(!mission_set_){
         this->current_mission_.data = msg->data;
         mission_set_ = true;
-        RCLCPP_INFO(this->get_logger(), "Mission set to %d", this->current_mission_.data);
+        RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Mission set to %d", this->current_mission_.data);
         if (this->current_mission_.data == lart_msgs::msg::Mission::SKIDPAD) {
             std::string package_share_dir = ament_index_cpp::get_package_share_directory("graph_slam");
             std::string map_path = package_share_dir + SKIDPAD_MAP;
             {
                 std::lock_guard<std::mutex> lock(optimizer_mutex_);
                 landmark_id_counter_ = MapManager::load_map(map_path, this->optimizer_);
-                RCLCPP_INFO(this->get_logger(), "Skidpad map loaded with %zu vertices.", this->optimizer_.vertices().size());
+                RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Skidpad map loaded with %zu vertices.", this->optimizer_.vertices().size());
             }
         }
         if (this->current_mission_.data == lart_msgs::msg::Mission::ACCELERATION)
             this->current_lap_++ ;
     } else {
-        RCLCPP_WARN(this->get_logger(), "Mission already set. Ignoring new mission message.");
+        RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Mission already set. Ignoring new mission message.");
     }
 }
 
@@ -519,20 +394,22 @@ void GraphSLAM::check_lap_completion()
                 this->initialized_once = false; // Re-initialize optimization for the localization phase
                 this->new_vertices.clear();
                 this->new_edges.clear();
-                RCLCPP_INFO(this->get_logger(), "initialized optimization again");
             }
         }
     }
 }
 
+int GraphSLAM::get_lap(){
+    return this->current_lap_;
+}
 
 void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset)
 {
-    //RCLCPP_INFO(this->get_logger(), "Only %zu new edges and %zu new vertices since last update. Skipping graph update.", eset.size(), vset.size());
+    //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Only %zu new edges and %zu new vertices since last update. Skipping graph update.", eset.size(), vset.size());
     std::lock_guard<std::mutex> lock(optimizer_mutex_);
 
     if(!this->initialized_once){
-        RCLCPP_INFO(this->get_logger(), "Performing initial graph optimization with %zu vertices and %zu edges.",
+        RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Performing initial graph optimization with %zu vertices and %zu edges.",
                     optimizer_.vertices().size(), optimizer_.edges().size());
 
         this->optimizer_.initializeOptimization();
@@ -558,7 +435,7 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
     optimizer_.computeActiveErrors();
     double chi_after = optimizer_.activeChi2();
 
-    RCLCPP_INFO(this->get_logger(),"chi2 before %.4f after %.4f",chi_before, chi_after);
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"chi2 before %.4f after %.4f",chi_before, chi_after);
 
     // Clear the sets after the update
     this->new_vertices.clear();
@@ -566,7 +443,7 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
 
 }
 
-void GraphSLAM::publish_map(std::vector<graph_slam_types::Cone> not_in_map_observations)
+visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_types::Cone> not_in_map_observations)
 {
     g2o::OptimizableGraph::VertexIDMap verts_map;
     {
@@ -574,17 +451,11 @@ void GraphSLAM::publish_map(std::vector<graph_slam_types::Cone> not_in_map_obser
         verts_map = optimizer_.vertices();
     }
     visualization_msgs::msg::MarkerArray map_markers_;
-    lart_msgs::msg::ConeArray map_cones_msg;
+    // lart_msgs::msg::ConeArray map_cones_msg;
     int id_counter = 1000;
     for (const auto& cone : not_in_map_observations) {
-        lart_msgs::msg::Cone cone_msg;
-        cone_msg.position.x = cone.x;
-        cone_msg.position.y = cone.y;
-        cone_msg.class_type.data = cone.type;
-        cone_msg.cone_id.data = -1; // Indicate that this is an unmatched observation
-        map_cones_msg.cones.push_back(cone_msg);
         visualization_msgs::msg::Marker marker;
-        marker.header.stamp = this->get_clock()->now();
+        marker.header.stamp = rclcpp::Clock().now();
         marker.header.frame_id = "world";
         marker.id = id_counter++; // Unique ID for each marker
         marker.ns = "graph_slam";
@@ -613,33 +484,22 @@ void GraphSLAM::publish_map(std::vector<graph_slam_types::Cone> not_in_map_obser
                 continue; // Skip landmarks with no edges, as we have no information about their uncertainty
             }
             for (auto* edge_base : v_landmark->edges()) {
-                // 1. Safely check the type
                 auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);
                 if (!e_se2xy) continue;
 
-                // 2. The robot pose is usually vertex(0) in an EdgeSE2PointXY
                 int current_pose_id = e_se2xy->vertex(0)->id();
 
-                // 3. Keep the one with the highest ID (most recent in time)
                 if (current_pose_id > max_pose_id) {
                     max_pose_id = current_pose_id;
                     most_recent_edge = e_se2xy;
                 }
             }
-
             const Eigen::Matrix2d &info = most_recent_edge->information();
             Eigen::Matrix2d cov = info.inverse();
-            
-            //Map
-            lart_msgs::msg::Cone cone_msg;
-            cone_msg.position.x = est[0];
-            cone_msg.position.y = est[1];
-            cone_msg.class_type.data = v_landmark->color();
-            cone_msg.cone_id.data = v_landmark->id();
-            map_cones_msg.cones.push_back(cone_msg);
+
             //Markers
             visualization_msgs::msg::Marker marker;
-            marker.header.stamp = this->get_clock()->now();
+            marker.header.stamp = rclcpp::Clock().now();
             marker.header.frame_id = "world";
             marker.ns = "graph_slam";
             marker.id = v_landmark->id();
@@ -684,20 +544,5 @@ void GraphSLAM::publish_map(std::vector<graph_slam_types::Cone> not_in_map_obser
             map_markers_.markers.push_back(marker);
         }
     }
-    map_publisher_->publish(map_cones_msg);
-    map_markers_publisher_->publish(map_markers_);
-}
-
-int main(int argc, char *argv[])
-{
-    rclcpp::init(argc, argv);
-
-    auto node = std::make_shared<GraphSLAM>();
-
-    rclcpp::executors::MultiThreadedExecutor executor;
-    executor.add_node(node);
-    executor.spin();
-
-    rclcpp::shutdown();
-    return 0;
+    return map_markers_;
 }
