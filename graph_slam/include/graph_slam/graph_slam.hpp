@@ -56,35 +56,34 @@ public:
     g2o::SparseOptimizer optimizer_;
     int get_lap(){return current_lap_;};
 private:
-    
+    // SLAM G2O Solvers
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
     using SlamLinearSolver = g2o::LinearSolverEigen<SlamBlockSolver::PoseMatrixType>;
+    //Vertex Ids
     long landmark_id_counter_ = -1;
     long pose_id_counter_ = 5000;
-    float angular_velocity_ = 0.0;
-    float velocity_ = 0.0;
-    std::chrono::steady_clock::time_point last_predict_time_{};
+    //Pose estimation
     Eigen::Vector3d current_pose_{0.0, 0.0, 0.0}; // x, y, theta
+    float velocity_ = 0.0;
+    float angular_velocity_ = 0.0;
+    std::chrono::steady_clock::time_point last_predict_time_{};
+    //Mutexes
     std::mutex pose_mutex_;
     std::mutex pose_id_mutex_;
     std::mutex optimizer_mutex_;
-    
     // Bookkeeping for new vertices and edges in each optimization step
     g2o::HyperGraph::VertexSet new_vertices;
     g2o::HyperGraph::EdgeSet   new_edges;
-
     // Stats variables
-    long frame_count_ = 0;
     long observation_count_ = 0;
-    double time_sum_ = 0.0;
+    float time_sum_ = 0.0;
     bool is_robot_moving_= false;
     bool initialized_once = false;
-    
     //Lap logic variables
     lart_msgs::msg::Mission current_mission_;
     bool mission_set_ = false;
     int16_t current_lap_ = -1;
-    double current_lap_distance_ = 0.0;
+    float current_lap_distance_ = 0.0;
     float lap_margin_x_ = 0.5;
     float lap_margin_y_ = 3.0;
     float lap_margin_ = 10.0;
