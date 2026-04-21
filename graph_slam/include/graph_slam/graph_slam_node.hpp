@@ -1,23 +1,7 @@
 #ifndef GRAPH_SLAM_NODE_HPP_
 #define GRAPH_SLAM_NODE_HPP_
 
-// #include <rclcpp/rclcpp.hpp>
 #include "graph_slam/graph_slam.hpp"
-
-// #include <geometry_msgs/msg/vector3_stamped.hpp>
-// #include <geometry_msgs/msg/pose_stamped.hpp>
-// #include <geometry_msgs/msg/transform_stamped.hpp>
-// #include <tf2/LinearMath/Quaternion.h>
-// #include <tf2_ros/transform_broadcaster.h>
-// #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-// #include <visualization_msgs/msg/marker_array.hpp>
-// #include <visualization_msgs/msg/marker.hpp>
-
-// #include "lart_msgs/msg/dynamics.hpp"
-// #include "lart_msgs/msg/cone_array.hpp"
-// #include "lart_msgs/msg/mission.hpp"
-// #include "lart_msgs/msg/slam_stats.hpp"
-// #include "lart_msgs/msg/cone.hpp"
 
 #define CONES_TOPIC "/mapping/cones" // observations
 #define DYNAMICS_TOPIC "/acu_origin/dynamics" //rpm and all

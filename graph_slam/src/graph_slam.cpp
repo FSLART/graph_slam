@@ -74,7 +74,6 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
     RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received ConeArray with %zu cones.", msg->cones.size());
     this->observation_count_++;
 
-    // TODO : replace placeholders with real values
     const long current_pose_id = pose_id_counter_;
     const auto robot_pose_ =this->current_pose_;
     g2o::OptimizableGraph::Vertex* v_pose = nullptr;
@@ -451,7 +450,6 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
         verts_map = optimizer_.vertices();
     }
     visualization_msgs::msg::MarkerArray map_markers_;
-    // lart_msgs::msg::ConeArray map_cones_msg;
     int id_counter = 1000;
     for (const auto& cone : not_in_map_observations) {
         visualization_msgs::msg::Marker marker;

@@ -3,19 +3,15 @@
 
 #include "graph_slam/associationSolver.hpp"
 #include "graph_slam/types_graph_slam.h"
-#include "graph_slam/custom_types.hpp"
 #include "graph_slam/map_manager.hpp"
 
 #include "lart_common.h"
 #include "lart_msgs/msg/dynamics.hpp"
-#include "lart_msgs/msg/cone_array.hpp"
 #include "lart_msgs/msg/mission.hpp"
 #include "lart_msgs/msg/slam_stats.hpp"
-#include "lart_msgs/msg/cone.hpp"
 
-#include <rclcpp/rclcpp.hpp>
+// #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/vector3_stamped.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
