@@ -175,7 +175,7 @@ public:
 
         auto end_time = std::chrono::steady_clock::now();
         auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-        RCLCPP_INFO(rclcpp::get_logger("association_solver"), "Mahalanobis association took %.3f ms.", duration_ms);
+        // RCLCPP_INFO(rclcpp::get_logger("association_solver"), "Mahalanobis association took %.3f ms.", duration_ms);
         return {associations, obs_global};
     }
 };

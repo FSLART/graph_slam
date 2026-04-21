@@ -26,6 +26,9 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     rclcpp::SubscriptionOptions obs_options;
     obs_options.callback_group = observations_callback_group;
 
+    rclcpp::SubscriptionOptions other_options;
+    other_options.callback_group = other_callbacks_group;
+
     // Subscribe to the cone observations topic
     observations_subscriber_ = this->create_subscription<lart_msgs::msg::ConeArray>(
         CONES_TOPIC, 10,
@@ -34,16 +37,16 @@ GraphSLAM::GraphSLAM() : Node("graph_slam_node")
     // Subscribe to the dynamics topic
     dynamics_subscriber_ = this->create_subscription<lart_msgs::msg::Dynamics>(
         DYNAMICS_TOPIC, 10,
-        bind(&GraphSLAM::dynamics_callback, this, _1));
+        bind(&GraphSLAM::dynamics_callback, this, _1), other_options);
 
     //Subscribe to angular velocity topic 
     imu_subscriber_ = this->create_subscription<geometry_msgs::msg::Vector3Stamped>(
         IMU_TOPIC, 10,
-        bind(&GraphSLAM::imu_callback, this, _1));
+        bind(&GraphSLAM::imu_callback, this, _1), other_options);
 
     mission_subscriber_ = this->create_subscription<lart_msgs::msg::Mission>(
         MISSION_TOPIC, 10,
-        bind(&GraphSLAM::mission_callback, this, _1));
+        bind(&GraphSLAM::mission_callback, this, _1), other_options);
 
     slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>(STATS_TOPIC, 10);
     
@@ -244,6 +247,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
             cone.type = cone_msg.class_type.data;
             observations.push_back(cone);
         }
+
         // if (localization_mode_) {
         //     localize_in_map(observations, map_cones_);
         //     return;
@@ -333,7 +337,7 @@ void GraphSLAM::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr
     auto end_time = std::chrono::steady_clock::now();
     auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
     time_sum_ += duration_ms;
-    // RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %.3f ms.", duration_ms);
+    RCLCPP_INFO(this->get_logger(), "Processing ConeArray took %.3f ms.", duration_ms);
     this->check_lap_completion();
     RCLCPP_INFO(this->get_logger(), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
     lart_msgs::msg::SlamStats stats_msg;
@@ -358,7 +362,6 @@ void GraphSLAM::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg)
     frame_count_ ++;
     float current_rpm = (float)msg->rpm;
     float ms_speed = RPM_TO_MS(current_rpm);
-    RCLCPP_INFO(this->get_logger(), "Received Dynamics message: RPM=%d, Speed=%.2f m/s", msg->rpm, ms_speed);
     this->velocity_ = ms_speed;
 
     tuple<double, double, double> deltas = this->compute_predicted_pose(this->velocity_, this->angular_velocity_); // Assuming velocity is 0 for prediction, can be replaced with actual velocity if available
@@ -492,8 +495,7 @@ void GraphSLAM::check_lap_completion()
         this->current_lap_++;
         this->current_lap_distance_ = 0.0; // Reset distance for the next lap
         if (this->current_lap_ == 1) {
-            this->new_vertices.clear();
-            this->new_edges.clear();
+            this->localization_mode_ = true;
             {
                 std::lock_guard<std::mutex> lock(optimizer_mutex_);
                 const auto& verts = optimizer_.vertices();
@@ -508,8 +510,16 @@ void GraphSLAM::check_lap_completion()
                 
                 for (const auto& item : landmarks_to_remove) {
                     VertexLandmark2D* v_landmark = item.second;
+                    g2o::HyperGraph::EdgeSet connectedEdges = v_landmark->edges();
+                    for (auto* edge : connectedEdges) {
+                        this->optimizer_.removeEdge(edge);
+                    }
                     this->optimizer_.removeVertex(v_landmark);
                 }
+                this->initialized_once = false; // Re-initialize optimization for the localization phase
+                this->new_vertices.clear();
+                this->new_edges.clear();
+                RCLCPP_INFO(this->get_logger(), "initialized optimization again");
             }
         }
     }
