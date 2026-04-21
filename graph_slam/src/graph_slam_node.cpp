@@ -53,7 +53,7 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
     std::thread broadcast_transform_thread ([this]() {
-        rclcpp::Rate rate(50);
+        rclcpp::Rate rate(40);
         while (rclcpp::ok()) {
             this->broadcast_transform();
             rate.sleep();
@@ -94,7 +94,7 @@ void GraphSLAM_Node::broadcast_transform(){
 }
 
 void GraphSLAM_Node::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg){
-    RCLCPP_INFO(this->get_logger(), "Received cone observations");
+    RCLCPP_DEBUG(this->get_logger(), "Received cone observations");
     visualization_msgs::msg::MarkerArray map_cones_markers = this->graph_slam_solver_->process_observations(msg);
     lart_msgs::msg::ConeArray map_cones_msg_ = this->create_map_markers(map_cones_markers);
 
@@ -117,10 +117,12 @@ void GraphSLAM_Node::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr
 void GraphSLAM_Node::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg){
     RCLCPP_DEBUG(this->get_logger(), "Received IMU angular velocity message");
     this->graph_slam_solver_->set_angular_velocity(msg);
+
+    this->graph_slam_solver_->compute_predicted_pose();
 }
 
 void GraphSLAM_Node::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg){
-    RCLCPP_INFO(this->get_logger(), "Received mission update: %d", msg->data);
+    RCLCPP_DEBUG(this->get_logger(), "Received mission update: %d", msg->data);
     this->graph_slam_solver_->set_mission(msg);
 }
 

@@ -224,42 +224,10 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
 
 void GraphSLAM::process_dynamics(const lart_msgs::msg::Dynamics::SharedPtr msg)
 {
-    if (msg->rpm == 0 && !this->is_robot_moving_){
-        return;
-    }
-
-    is_robot_moving_ = true; // Update the robot's moving status
-    if (frame_count_ % 5 != 0) {
-        frame_count_++;
-        return; // Skip this callback to reduce frequency
-    }
-    frame_count_ ++;
     float current_rpm = (float)msg->rpm;
     float ms_speed = RPM_TO_MS(current_rpm);
     this->velocity_ = ms_speed;
 
-    tuple<double, double, double> deltas = this->compute_predicted_pose(this->velocity_, this->angular_velocity_); // Assuming velocity is 0 for prediction, can be replaced with actual velocity if available
-    
-    {
-        std::lock_guard<std::mutex> lock(optimizer_mutex_);
-        VertexSE2* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
-        
-        VertexSE2* new_pose_vertex =  new VertexSE2();
-        new_pose_vertex->setId(++pose_id_counter_);
-        new_pose_vertex->setEstimate(SE2(current_pose_[0], current_pose_[1], current_pose_[2]));
-        optimizer_.addVertex(new_pose_vertex);
-        this->new_vertices.insert(new_pose_vertex); // Add new pose vertex for update bookkeeping
-        
-        EdgeSE2* odom_edge = new EdgeSE2();
-        odom_edge->setVertex(0, current_pose_vertex);
-        odom_edge->setVertex(1, new_pose_vertex);
-        odom_edge->setMeasurement(SE2(get<0>(deltas), get<1>(deltas), get<2>(deltas)));
-        odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
-        optimizer_.addEdge(odom_edge);
-        this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
-    }
-        
-        
     RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received Dynamics message: %f", ms_speed);
 }
 
@@ -292,19 +260,25 @@ void GraphSLAM::set_mission(const lart_msgs::msg::Mission::SharedPtr msg)
 }
 
 
-tuple<double,double,double> GraphSLAM::compute_predicted_pose(float velocity, float omega_z)
+void GraphSLAM::compute_predicted_pose()
 {
+    if (this->velocity_ == 0.0 && !this->is_robot_moving_){
+        return;
+    }
+
+    is_robot_moving_ = true;
+
     auto now = chrono::steady_clock::now();
     if (last_predict_time_.time_since_epoch().count() == 0) {
         last_predict_time_ = now;
-        return make_tuple(0.0, 0.0, 0.0); // No movement on the first call
+        return;
     }
 
     double dt = chrono::duration<double>(now - last_predict_time_).count();
     last_predict_time_ = now;
 
-    double v = static_cast<double>(velocity);
-    double w = static_cast<double>(omega_z);
+    double v = static_cast<double>(this->velocity_);
+    double w = static_cast<double>(this->angular_velocity_);
     double theta = current_pose_[2];
 
     double dx = 0.0;
@@ -327,7 +301,24 @@ tuple<double,double,double> GraphSLAM::compute_predicted_pose(float velocity, fl
     // Normalize angle to [-pi, pi]
     current_pose_[2] = atan2(sin(current_pose_[2]), cos(current_pose_[2]));
 
-    return make_tuple(dx, dy, w * dt);
+    {
+        std::lock_guard<std::mutex> lock(optimizer_mutex_);
+        VertexSE2* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
+        
+        VertexSE2* new_pose_vertex =  new VertexSE2();
+        new_pose_vertex->setId(++pose_id_counter_);
+        new_pose_vertex->setEstimate(SE2(current_pose_[0], current_pose_[1], current_pose_[2]));
+        optimizer_.addVertex(new_pose_vertex);
+        this->new_vertices.insert(new_pose_vertex); // Add new pose vertex for update bookkeeping
+        
+        EdgeSE2* odom_edge = new EdgeSE2();
+        odom_edge->setVertex(0, current_pose_vertex);
+        odom_edge->setVertex(1, new_pose_vertex);
+        odom_edge->setMeasurement(SE2(dx, dy, w * dt));
+        odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
+        this->optimizer_.addEdge(odom_edge);
+        this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
+    }
 }
 
 void GraphSLAM::check_lap_completion()
@@ -390,20 +381,15 @@ void GraphSLAM::check_lap_completion()
                     }
                     this->optimizer_.removeVertex(v_landmark);
                 }
-                this->initialized_once = false; // Re-initialize optimization for the localization phase
+                this->initialized_once = false; //FIXME : THIS DOES NOT SOLVE THE PROBLEM
                 this->new_vertices.clear();
                 this->new_edges.clear();
-                this->update_graph(this->new_vertices, this->new_edges); // Perform an initial optimization after removing unreliable landmarks
                 this->optimizer_.save("final_graph.g2o");
                 if(this->current_mission_.data == lart_msgs::msg::Mission::AUTOCROSS || this->current_mission_.data == lart_msgs::msg::Mission::TRACKDRIVE)
                     MapManager::save_map(this->current_mission_.data, this->optimizer_);
             }
         }
     }
-}
-
-int GraphSLAM::get_lap(){
-    return this->current_lap_;
 }
 
 void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset)
@@ -453,29 +439,42 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
         std::lock_guard<std::mutex> lock(optimizer_mutex_);
         verts_map = optimizer_.vertices();
     }
+    auto now = rclcpp::Clock().now();
+
+    auto make_marker = [&](int id, double x, double y) {
+        visualization_msgs::msg::Marker m;
+        m.header.stamp    = now;
+        m.header.frame_id = "world";
+        m.ns              = "graph_slam";
+        m.id              = id;
+        m.type            = visualization_msgs::msg::Marker::SPHERE;
+        m.action          = visualization_msgs::msg::Marker::ADD;
+        m.lifetime = rclcpp::Duration(0, 500'000'000);
+        m.pose.position.x = x;
+        m.pose.position.y = y;
+        m.pose.position.z = 0.0;
+        m.color.a         = 0.5f;
+        return m;
+    };
+
+    static const std::unordered_map<uint8_t, std::array<float,3>> kConeColors = {
+        { lart_msgs::msg::Cone::YELLOW,       {1.0f, 1.0f, 0.0f} },
+        { lart_msgs::msg::Cone::BLUE,         {0.0f, 0.0f, 1.0f} },
+        { lart_msgs::msg::Cone::ORANGE_SMALL, {1.0f, 0.5f, 0.0f} },
+        { lart_msgs::msg::Cone::ORANGE_BIG,   {1.0f, 0.2f, 0.0f} },
+    };
+    
     visualization_msgs::msg::MarkerArray map_markers_;
     int id_counter = 1000;
     for (const auto& cone : not_in_map_observations) {
-        visualization_msgs::msg::Marker marker;
-        marker.header.stamp = rclcpp::Clock().now();
-        marker.header.frame_id = "world";
-        marker.id = id_counter++; // Unique ID for each marker
-        marker.ns = "graph_slam";
-        marker.type = visualization_msgs::msg::Marker::SPHERE;
-        marker.action = visualization_msgs::msg::Marker::ADD;
-        marker.lifetime = rclcpp::Duration(0, 400000000); // Marker will last for 0.5 seconds
-        marker.pose.position.x = cone.x;
-        marker.pose.position.y = cone.y;
-        marker.pose.position.z = 0.0;
-        marker.scale.x = 0.2; 
-        marker.scale.y = 0.2;
-        marker.scale.z = 0.4;
-        marker.color.a = 0.5f;
-        marker.color.r = 0.6f;
-        marker.color.g = 0.6f;
-        marker.color.b = 0.6f;
-        map_markers_.markers.push_back(marker);
+        auto m    = make_marker(id_counter++, cone.x, cone.y);
+        m.scale.x = m.scale.y = 0.2;
+        m.scale.z = 0.4;
+        m.color.r = m.color.g = m.color.b = 0.6f;
+        map_markers_.markers.push_back(std::move(m));
     }
+
+
     for (const auto &kv : verts_map) {
         auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
         if (v_landmark) {
@@ -499,52 +498,17 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
             const Eigen::Matrix2d &info = most_recent_edge->information();
             Eigen::Matrix2d cov = info.inverse();
 
-            //Markers
-            visualization_msgs::msg::Marker marker;
-            marker.header.stamp = rclcpp::Clock().now();
-            marker.header.frame_id = "world";
-            marker.ns = "graph_slam";
-            marker.id = v_landmark->id();
-            marker.type = visualization_msgs::msg::Marker::SPHERE;
-            marker.action = visualization_msgs::msg::Marker::ADD;
-            marker.lifetime = rclcpp::Duration(0, 500000000); // Marker will last for 0.5 seconds
-            marker.pose.position.x = est[0];
-            marker.pose.position.y = est[1];
-            marker.pose.position.z = 0.0;
-            marker.scale.x = std::sqrt(cov(0, 0)) * 2.0; 
-            marker.scale.y = std::sqrt(cov(1, 1)) * 2.0;
-            marker.scale.z = 0.4;
-            marker.color.a = 0.5f;
-            // Set color based on cone class type
-            switch (v_landmark->color()) {
-                case lart_msgs::msg::Cone::YELLOW:
-                    marker.color.r = 1.0f;
-                    marker.color.g = 1.0f;
-                    marker.color.b = 0.0f;
-                break;
-                case lart_msgs::msg::Cone::BLUE:
-                    marker.color.g = 0.0f;
-                    marker.color.r = 0.0f;
-                    marker.color.b = 1.0f;
-                    break;
-                case lart_msgs::msg::Cone::ORANGE_SMALL:
-                    marker.color.r = 1.0f;
-                    marker.color.g = 0.5f; // Orange is a mix of red and yellow
-                    marker.color.b = 0.0f;
-                    break;
-                case lart_msgs::msg::Cone::ORANGE_BIG:
-                    marker.color.r = 1.0f;
-                    marker.color.g = 0.2f; // Orange is a mix of red and yellow
-                    marker.color.b = 0.0f;
-                    break;
-                default:
-                    // Default to white if unknown color type
-                    marker.color.r = 1.0f;
-                    marker.color.g = 1.0f;
-                    marker.color.b = 1.0f;
-            }
-            map_markers_.markers.push_back(marker);
-        }
+            auto m    = make_marker(v_landmark->id(), est[0], est[1]);
+            m.scale.x = std::sqrt(cov(0,0)) * 2.0;
+            m.scale.y = std::sqrt(cov(1,1)) * 2.0;
+            m.scale.z = 0.4;
+
+            auto it = kConeColors.find(v_landmark->color());
+            const auto& rgb = (it != kConeColors.end()) ? it->second : std::array{1.f,1.f,1.f};
+            m.color.r = rgb[0]; m.color.g = rgb[1]; m.color.b = rgb[2];
+
+            map_markers_.markers.push_back(std::move(m));        }
     }
     return map_markers_;
 }
+

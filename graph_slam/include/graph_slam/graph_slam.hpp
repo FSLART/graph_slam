@@ -41,8 +41,6 @@
 
 #define ONLINE_FLAG true
 
-
-
 class GraphSLAM
 {
 public:
@@ -53,11 +51,10 @@ public:
     void process_dynamics(const lart_msgs::msg::Dynamics::SharedPtr msg);
     void set_angular_velocity(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
     void set_mission(const lart_msgs::msg::Mission::SharedPtr msg);
-    std::tuple<double, double, double> compute_predicted_pose(float velocity, float omega_z);
-    void update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset);
-    g2o::SparseOptimizer optimizer_;
+    void compute_predicted_pose();
     Eigen::Vector3d get_current_pose();
-    int get_lap();
+    g2o::SparseOptimizer optimizer_;
+    int get_lap(){return current_lap_;};
 private:
     
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
@@ -71,7 +68,7 @@ private:
     std::mutex pose_mutex_;
     std::mutex pose_id_mutex_;
     std::mutex optimizer_mutex_;
-
+    
     // Bookkeeping for new vertices and edges in each optimization step
     g2o::HyperGraph::VertexSet new_vertices;
     g2o::HyperGraph::EdgeSet   new_edges;
@@ -82,7 +79,7 @@ private:
     double time_sum_ = 0.0;
     bool is_robot_moving_= false;
     bool initialized_once = false;
-
+    
     //Lap logic variables
     lart_msgs::msg::Mission current_mission_;
     bool mission_set_ = false;
@@ -92,9 +89,10 @@ private:
     float lap_margin_y_ = 3.0;
     float lap_margin_ = 10.0;
     void check_lap_completion();
-
+    
     bool localization_mode_ = false;
     
+    void update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset);
     visualization_msgs::msg::MarkerArray get_map(std::vector<graph_slam_types::Cone> cones = {});
 
 protected:
