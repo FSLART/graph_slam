@@ -393,6 +393,10 @@ void GraphSLAM::check_lap_completion()
                 this->initialized_once = false; // Re-initialize optimization for the localization phase
                 this->new_vertices.clear();
                 this->new_edges.clear();
+                this->update_graph(this->new_vertices, this->new_edges); // Perform an initial optimization after removing unreliable landmarks
+                this->optimizer_.save("final_graph.g2o");
+                if(this->current_mission_.data == lart_msgs::msg::Mission::AUTOCROSS || this->current_mission_.data == lart_msgs::msg::Mission::TRACKDRIVE)
+                    MapManager::save_map(this->current_mission_.data, this->optimizer_);
             }
         }
     }
