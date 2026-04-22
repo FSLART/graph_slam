@@ -83,6 +83,26 @@ void MapManager::save_map(const int mission, SparseOptimizer& optimizer_)
     out << YAML::Key << "lanesFirstWithLastConnected";
     out << YAML::Value << "true";
 
+    out << YAML::Key << "time_keeping";
+    out << YAML::Value << YAML::BeginSeq;
+    
+    YAML::Node timekeeping_left;
+    timekeeping_left["position"] = std::vector<double>{6.0, 5.0, 0.0};
+    timekeeping_left["position"].SetStyle(YAML::EmitterStyle::Flow);
+    timekeeping_left["class"] = "timekeeping";
+    timekeeping_left.SetStyle(YAML::EmitterStyle::Block);
+
+    YAML::Node timekeeping_right;
+    timekeeping_right["position"] = std::vector<double>{6.0, -5.0, 0.0};
+    timekeeping_right["position"].SetStyle(YAML::EmitterStyle::Flow);
+    timekeeping_right["class"] = "timekeeping";
+    timekeeping_right.SetStyle(YAML::EmitterStyle::Block);
+
+    out << timekeeping_left;
+    out << timekeeping_right;
+
+    out << YAML::EndSeq;
+
     // Start Section
     out << YAML::Key << "start";
     out << YAML::Value << YAML::BeginMap;

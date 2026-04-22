@@ -363,27 +363,32 @@ void GraphSLAM::check_lap_completion()
             this->localization_mode_ = true;
             {
                 std::lock_guard<std::mutex> lock(optimizer_mutex_);
-                const auto& verts = optimizer_.vertices();
-                std::vector<std::pair<int, VertexLandmark2D*>> landmarks_to_remove;
-                landmarks_to_remove.reserve(verts.size());
-                for (const auto& kv : verts) {
-                    auto* v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
-                    if (v_landmark && v_landmark->edges().size() < 4) {
-                        landmarks_to_remove.emplace_back(kv.first, v_landmark);
-                    }
-                }
                 
-                for (const auto& item : landmarks_to_remove) {
-                    VertexLandmark2D* v_landmark = item.second;
-                    g2o::HyperGraph::EdgeSet connectedEdges = v_landmark->edges();
-                    for (auto* edge : connectedEdges) {
-                        this->optimizer_.removeEdge(edge);
-                    }
-                    this->optimizer_.removeVertex(v_landmark);
+                std::vector<VertexLandmark2D*> to_remove;
+                for (const auto& [id, v] : optimizer_.vertices()) {
+                    auto* vl = dynamic_cast<VertexLandmark2D*>(v);
+                    if (vl && vl->edges().size() < 5)
+                        to_remove.push_back(vl);
                 }
-                this->initialized_once = false; //FIXME : THIS DOES NOT SOLVE THE PROBLEM
+
+                for (auto* vl : to_remove){
+                    std::vector<g2o::OptimizableGraph::Edge*> edges_to_remove;
+                    for (auto* eb : vl->edges()) {
+                        edges_to_remove.push_back(
+                            dynamic_cast<g2o::OptimizableGraph::Edge*>(eb));
+                    }
+
+                    for (auto* e : edges_to_remove) {
+                        optimizer_.removeEdge(e);
+                    }
+
+                    optimizer_.removeVertex(vl);
+                }
+                // this->initialized_once = false; //FIXME : THIS DOES NOT SOLVE THE PROBLEM
                 this->new_vertices.clear();
                 this->new_edges.clear();
+                this->optimizer_.initializeOptimization();
+                this->optimizer_.optimize(1, false);
                 this->optimizer_.save("final_graph.g2o");
                 if(this->current_mission_.data == lart_msgs::msg::Mission::AUTOCROSS || this->current_mission_.data == lart_msgs::msg::Mission::TRACKDRIVE)
                     MapManager::save_map(this->current_mission_.data, this->optimizer_);
