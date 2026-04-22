@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include "yaml-cpp/yaml.h"
+#include <rclcpp/rclcpp.hpp>
+
 
 #include <g2o/core/sparse_optimizer.h>
 #include "graph_slam/types_graph_slam.h"

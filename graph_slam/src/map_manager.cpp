@@ -49,7 +49,9 @@ void MapManager::save_map(const int mission, SparseOptimizer& optimizer_)
     std::string package_name = "graph_slam"; // Change to your actual package name
     std::string package_share_directory = ament_index_cpp::get_package_share_directory(package_name);
     
-    std::filesystem::path maps_dir = std::filesystem::path(package_share_directory) / "maps";
+    std::filesystem::path maps_dir = std::filesystem::path(package_share_directory).parent_path().parent_path().parent_path().parent_path() / "src" / "graph_slam" / "maps";
+
+    RCLCPP_INFO(rclcpp::get_logger("MapManager"), "Saving map to directory: %s", maps_dir.c_str());
 
     if (!std::filesystem::exists(maps_dir)) {
         std::filesystem::create_directories(maps_dir);
@@ -76,6 +78,30 @@ void MapManager::save_map(const int mission, SparseOptimizer& optimizer_)
     // Version
     out << YAML::Key << "version";
     out << YAML::Value << "1.0";
+
+    //lanes connected
+    out << YAML::Key << "lanesFirstWithLastConnected";
+    out << YAML::Value << "true";
+
+    out << YAML::Key << "time_keeping";
+    out << YAML::Value << YAML::BeginSeq;
+    
+    YAML::Node timekeeping_left;
+    timekeeping_left["position"] = std::vector<double>{6.0, 5.0, 0.0};
+    timekeeping_left["position"].SetStyle(YAML::EmitterStyle::Flow);
+    timekeeping_left["class"] = "timekeeping";
+    timekeeping_left.SetStyle(YAML::EmitterStyle::Block);
+
+    YAML::Node timekeeping_right;
+    timekeeping_right["position"] = std::vector<double>{6.0, -5.0, 0.0};
+    timekeeping_right["position"].SetStyle(YAML::EmitterStyle::Flow);
+    timekeeping_right["class"] = "timekeeping";
+    timekeeping_right.SetStyle(YAML::EmitterStyle::Block);
+
+    out << timekeeping_left;
+    out << timekeeping_right;
+
+    out << YAML::EndSeq;
 
     // Start Section
     out << YAML::Key << "start";

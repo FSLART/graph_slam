@@ -21,6 +21,7 @@ find_package(yaml-cpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
 add_executable(graph_slam_node
+  src/graph_slam_node.cpp
   src/graph_slam.cpp
   src/associationSolver.cpp
   src/types_graph_slam.cpp
