@@ -184,7 +184,35 @@ class MapPanel(QWidget):
         self.canvas.ax.set_title(self.title, fontdict=font1)
         self.canvas.ax.set_aspect("equal")
         self.canvas.ax.grid()
-        self.canvas.ax.legend(bbox_to_anchor=(0.48, -0.1), loc="upper center", ncol=2)
+        self.canvas.ax.legend(bbox_to_anchor=(0.5, -0.04), loc="upper center", ncol=2)
+
+        # Cones count
+        total_cones = len(blue) + len(yellow) + len(orange) + len(sorange)
+
+        info_text = (
+            "Cone Count\n\n"
+            f"Blue: {len(blue)}    Yellow: {len(yellow)}\n"
+            f"Big Orange: {len(orange)}    Small Orange: {len(sorange)}\n"
+            f"────────────\n"
+            f"Total: {total_cones}"
+        )
+
+        self.canvas.ax.text(
+            0.5, -0.24,
+            info_text,
+            transform=self.canvas.ax.transAxes,
+            fontsize=10,
+            ha="center",
+            va="top",
+            bbox=dict(
+                boxstyle="round",
+                facecolor="#f8f8f8",
+                edgecolor="gray",
+                alpha=0.9
+            )
+        )
+
+        self.canvas.fig.subplots_adjust(bottom=0.36)
 
         self.canvas.draw()
 
@@ -275,14 +303,15 @@ class DropMapPanel(QWidget):
         super().__init__()
 
         self.map = MapPanel(title)
-
+        
         self.label = QLabel(hint_text)
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setStyleSheet(f"""
             QLabel {{
                 border: 3px dashed {color};
-                font-size: 18px;
-                padding: 30px;
+                font-size: 16px;
+                padding: 25px;
+                line-height: 1.4;
             }}
         """)
 
