@@ -4,7 +4,7 @@ import numpy as np
 
 from PyQt5.QtWidgets import (
     QApplication, QFrame, QLabel, QVBoxLayout, QWidget,
-    QSplitter, QPushButton
+    QSplitter, QPushButton, QFileDialog
 )
 from PyQt5.QtCore import Qt
 
@@ -397,10 +397,13 @@ class ControlPanel(QWidget):
         btn_left = QPushButton("Reset GT")
         btn_right = QPushButton("Reset SLAM")
         btn_all = QPushButton("Reset BOTH")
+        btn_save = QPushButton("Save Aligned SLAM")
+        
 
         btn_left.clicked.connect(self.left.reset)
         btn_right.clicked.connect(self.right.reset)
         btn_all.clicked.connect(self.reset_all)
+        btn_save.clicked.connect(self.save_overlay_yaml)
 
         # --- ATE SECTION ---
         layout.addWidget(self.ate_label)
@@ -421,6 +424,7 @@ class ControlPanel(QWidget):
         layout.addWidget(btn_left)
         layout.addWidget(btn_right)
         layout.addWidget(btn_all)
+        layout.addWidget(btn_save)
         layout.addStretch()
 
         self.setLayout(layout)
@@ -452,6 +456,12 @@ class ControlPanel(QWidget):
         slam_orange_aligned = (R @ slam_orange.T).T + t if len(slam_orange) else slam_orange
         slam_sorange_aligned = (R @ slam_sorange.T).T + t if len(slam_sorange) else slam_sorange
 
+        # Store aligned SLAM for potential saving
+        self.last_slam_left = slam_left_aligned
+        self.last_slam_right = slam_right_aligned
+        self.last_slam_orange = slam_orange_aligned
+        self.last_slam_sorange = slam_sorange_aligned
+
         # --- ATE ---
         blue_ate = symmetric_ate(gt_left, slam_left_aligned)
         yellow_ate = symmetric_ate(gt_right, slam_right_aligned)
@@ -476,6 +486,73 @@ class ControlPanel(QWidget):
             gt_left, gt_right, gt_orange, gt_sorange,
             slam_left_aligned, slam_right_aligned, slam_orange_aligned, slam_sorange_aligned    
         )
+    
+    def save_overlay_yaml(self):
+        if not hasattr(self, "last_slam_left"):
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Overlay Map",
+            "",
+            "YAML Files (*.yaml *.yml)"
+        )
+
+        if not file_path:
+            return
+
+        def build_cones(points, cone_class):
+            cones = []
+            for p in points:
+                cones.append({
+                    "position": [
+                        float(p[0]),
+                        float(p[1]),
+                        0.0
+                    ],
+                    "class": cone_class
+                })
+            return cones
+
+        # left = blue cones
+        left_cones = build_cones(self.last_slam_left, "blue")
+
+        # right = yellow cones
+        right_cones = build_cones(self.last_slam_right, "yellow")
+
+        # unknown = orange cones
+        unknown_cones = []
+        unknown_cones += build_cones(self.last_slam_orange, "big-orange")
+        unknown_cones += build_cones(self.last_slam_sorange, "small-orange")
+
+        output_data = {
+            "track": {
+                "version": 1.0,
+                "lanesFirstWithLastConnected": True,
+
+                "start": {
+                    "position": [0.0, 0.0, 0.0],
+                    "orientation": [0.0, 0.0, 0.0]
+                },
+
+                "earthToTrack": {
+                    "position": [0.0, 0.0, 0.0],
+                    "orientation": [0.0, 0.0, 0.0]
+                },
+
+                "left": left_cones,
+                "right": right_cones,
+                "unknown": unknown_cones
+            }
+        }
+
+        with open(file_path, "w") as f:
+            yaml.dump(
+                output_data,
+                f,
+                sort_keys=False,
+                default_flow_style=None
+            )
 
     def reset_all(self):
         self.left.reset()
@@ -485,6 +562,8 @@ class ControlPanel(QWidget):
         self.blue_box.setText("Blue ATE\n---")
         self.yellow_box.setText("Yellow ATE\n---")
         self.total_box.setText("Total ATE\n---")
+        self.rot_box.setText("ICP Rotation\n---")
+        self.trans_box.setText("ICP Translation\n---")
 
 
 # =========================
