@@ -10,7 +10,6 @@
 #include "lart_msgs/msg/mission.hpp"
 #include "lart_msgs/msg/slam_stats.hpp"
 
-// #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/vector3_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2/LinearMath/Quaternion.h>
@@ -20,9 +19,7 @@
 #include <visualization_msgs/msg/marker.hpp>
 
 #include <chrono>
-#include <map>
 #include <ament_index_cpp/get_package_share_directory.hpp>
-#include <string>
 
 #include <g2o/core/sparse_optimizer.h>
 #include <g2o/core/optimization_algorithm_levenberg.h>

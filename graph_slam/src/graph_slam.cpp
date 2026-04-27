@@ -216,9 +216,9 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
     auto end_time = std::chrono::steady_clock::now();
     auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
     time_sum_ += duration_ms;
-    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Processing ConeArray took %.3f ms.", duration_ms);
     this->check_lap_completion();
-    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
+    // RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Processing ConeArray took %.3f ms.", duration_ms);
+    // RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
     return this->get_map(not_added_observations);
 }
 
