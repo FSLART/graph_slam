@@ -485,8 +485,7 @@ void GraphSLAM::check_lap_completion()
                 std::vector<VertexLandmark2D*> to_remove;
                 for (const auto& [id, v] : optimizer_.vertices()) {
                     auto* vl = dynamic_cast<VertexLandmark2D*>(v);
-                    // Fix every cone vertex after the first lap completion
-                    vl->setFixed(true);
+                    //vl->setFixed(true);
                     if (vl && vl->edges().size() < 5)
                         to_remove.push_back(vl);
                 }
@@ -515,20 +514,22 @@ void GraphSLAM::check_lap_completion()
 
                 
                 // Make every landmark vertex fixed to prevent drift in localization mode
-                // for (const auto& [id, v] : optimizer_.vertices()) {
-                //     auto* vl = dynamic_cast<VertexLandmark2D*>(v);
-                //     if (vl) {
-                //         vl->setFixed(true);
-                //     }
-                // }
+                for (const auto& [id, v] : optimizer_.vertices()) {
+                    auto* vl = dynamic_cast<VertexLandmark2D*>(v);
+                    if (vl) {
+                        vl->setFixed(true);
+                    }
+                }
 
                 // Build a KD-tree for the current map
                 this->build_map_kdtree();
 
-                // Build and save in cache the final vizualization map
-                auto empty_observations = std::vector<graph_slam_types::Cone>{};
-                this->final_map_ = this->get_map(empty_observations);
+                RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"Localization_mode = %d",localization_mode_);
             }
+            // Build and save in cache the final vizualization map
+            auto empty_observations = std::vector<graph_slam_types::Cone>{};
+            this->final_map_ = this->get_map(empty_observations);
+            RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "1ºLAP COMPLETED AND OTHER STUFF !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
         }
     }
 }
@@ -577,6 +578,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
 {
     g2o::OptimizableGraph::VertexIDMap verts_map;
     {
+        RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"MIAUMIAU123?");
         std::lock_guard<std::mutex> lock(optimizer_mutex_);
         verts_map = optimizer_.vertices();
     }
@@ -615,7 +617,6 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
         map_markers_.markers.push_back(std::move(m));
     }
 
-
     for (const auto &kv : verts_map) {
         auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
         if (v_landmark) {
@@ -648,7 +649,8 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
             const auto& rgb = (it != kConeColors.end()) ? it->second : std::array{1.f,1.f,1.f};
             m.color.r = rgb[0]; m.color.g = rgb[1]; m.color.b = rgb[2];
 
-            map_markers_.markers.push_back(std::move(m));        }
+            map_markers_.markers.push_back(std::move(m));        
+        }
     }
     return map_markers_;
 }
