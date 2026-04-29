@@ -120,6 +120,7 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
     }
 
     // For each observation, find the nearest landmark in the map using the KD-tree
+    std::vector<g2o::EdgeSE2PointXY*> temp_loc_edges; // Store aux edges
     std::vector<int> matches(observations.size(), -1); // Initialize all matches to -1 (no match)
     for (size_t i = 0; i < obs_global.size(); ++i) {
         const auto& obs = obs_global[i];
@@ -138,8 +139,18 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
             g2o::EdgeSE2PointXY* edge = new g2o::EdgeSE2PointXY();
 
             {
+                auto* pose_vertex = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id));
+
+                auto* landmark_vertex = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(map_kdtree_landmarks_[idx].vertex_id));
+
+                if (!pose_vertex || !landmark_vertex) {
+                    RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Null vertex detected, skipping edge.");
+                    delete edge;
+                    continue;
+                }
+
                 std::lock_guard<std::mutex> lock(optimizer_mutex_);
-                edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));
+                edge->setVertex(0, pose_vertex);
                 edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(map_kdtree_landmarks_[idx].vertex_id)));
             }
 
@@ -156,7 +167,10 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
             {
                 std::lock_guard<std::mutex> lock(optimizer_mutex_);
                 this->optimizer_.addEdge(edge);
+                // Store edge for later removal
+                temp_loc_edges.push_back(edge);
             }
+           
 
         } else {
             RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Observation %zu could not be localized to any landmark.", i);
@@ -166,11 +180,19 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
 
     // Preform optimization
     {
-    std::lock_guard<std::mutex> lock(optimizer_mutex_);
+        std::lock_guard<std::mutex> lock(optimizer_mutex_);
+        optimizer_.initializeOptimization();
+        optimizer_.optimize(1);
 
-    optimizer_.initializeOptimization();
-    optimizer_.optimize(1);
-}
+        // Remove edges after their use as expired
+        for (auto* edge : temp_loc_edges) {
+            optimizer_.removeEdge(edge);
+            //delete edge;
+        }
+        temp_loc_edges.clear();
+    }
+
+    
 
 }
 
@@ -536,7 +558,6 @@ void GraphSLAM::check_lap_completion()
             // Build and save in cache the final vizualization map
             auto empty_observations = std::vector<graph_slam_types::Cone>{};
             this->final_map_ = this->get_map(empty_observations);
-            RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "1ºLAP COMPLETED AND OTHER STUFF !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
         }
     }
 }
@@ -585,7 +606,6 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
 {
     g2o::OptimizableGraph::VertexIDMap verts_map;
     {
-        RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"MIAUMIAU123?");
         std::lock_guard<std::mutex> lock(optimizer_mutex_);
         verts_map = optimizer_.vertices();
     }
