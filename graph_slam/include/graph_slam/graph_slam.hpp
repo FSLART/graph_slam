@@ -33,6 +33,10 @@
 #include <g2o/types/slam2d/edge_se2_pointxy.h>
 #include <g2o/core/robust_kernel_impl.h>
 
+#include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+
 
 #define ASSOCIATION_MODE 1
 
@@ -40,6 +44,11 @@
 #define SKIDPAD_MAP "/maps/skidpad.yaml.default"
 
 #define ONLINE_FLAG true
+
+struct LandmarkKDInfo {
+    long vertex_id;
+    int color;
+};
 
 class GraphSLAM
 {
@@ -90,8 +99,21 @@ private:
     void check_lap_completion();
     
     bool localization_mode_ = false;
+    visualization_msgs::msg::MarkerArray final_map_;
+
+    // KD-tree variables
+    pcl::PointCloud<pcl::PointXYZ>::Ptr map_cloud_{new pcl::PointCloud<pcl::PointXYZ>()};
+    pcl::KdTreeFLANN<pcl::PointXYZ> map_kdtree_;
+    // std::vector<long> map_kdtree_vertex_ids_;
+
+    std::vector<LandmarkKDInfo> map_kdtree_landmarks_;
+
+    bool map_kdtree_ready_ = false;
+
+    void build_map_kdtree();
     
     void update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset);
+    void localize_in_map(std::vector<graph_slam_types::Cone>& observations, long current_pose_id, Eigen::Vector3d robot_pose);
     visualization_msgs::msg::MarkerArray get_map(std::vector<graph_slam_types::Cone> cones = {});
 
 protected:
