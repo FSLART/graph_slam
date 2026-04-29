@@ -105,6 +105,7 @@ private:
     pcl::PointCloud<pcl::PointXYZ>::Ptr map_cloud_{new pcl::PointCloud<pcl::PointXYZ>()};
     pcl::KdTreeFLANN<pcl::PointXYZ> map_kdtree_;
     // std::vector<long> map_kdtree_vertex_ids_;
+    u_int8_t count_locliz_updts_ = 0;
 
     std::vector<LandmarkKDInfo> map_kdtree_landmarks_;
 

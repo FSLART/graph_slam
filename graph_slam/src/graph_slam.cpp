@@ -99,6 +99,13 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
         return;
     }
 
+    // Testing to see what happens if the rate of update is slower
+    if(this->count_locliz_updts_ < 10){
+        this->count_locliz_updts_++;
+        return;
+    }
+    this->count_locliz_updts_ = 0;
+
     // Transform observations to global frame
     std::vector<graph_slam_types::Cone> obs_global;
 
@@ -162,7 +169,7 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
     std::lock_guard<std::mutex> lock(optimizer_mutex_);
 
     optimizer_.initializeOptimization();
-    optimizer_.optimize(5);
+    optimizer_.optimize(1);
 }
 
 }
