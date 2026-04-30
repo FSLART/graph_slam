@@ -99,6 +99,8 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
         return;
     }
 
+    auto start_time = std::chrono::steady_clock::now();
+
     // Testing to see what happens if the rate of update is slower
     if(this->count_locliz_updts_ < 10){
         this->count_locliz_updts_++;
@@ -120,7 +122,7 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
     }
 
     // For each observation, find the nearest landmark in the map using the KD-tree
-    std::vector<g2o::EdgeSE2PointXY*> temp_loc_edges; // Store aux edges
+    std::vector<g2o::HyperGraph::Edge*> temp_loc_edges; // Store aux edges
     std::vector<int> matches(observations.size(), -1); // Initialize all matches to -1 (no match)
     for (size_t i = 0; i < obs_global.size(); ++i) {
         const auto& obs = obs_global[i];
@@ -158,6 +160,7 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
             edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
             observations[i].calculate_information(robot_pose[2]);
             edge->setInformation(observations[i].information);
+            edge->setLevel(0);
 
             // Set robust kernel
             auto rk = new RobustKernelHuber();
@@ -178,21 +181,33 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
         }
     }
 
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"Amount of edges created for localization: %ld", temp_loc_edges.size());
+
     // Preform optimization
     {
         std::lock_guard<std::mutex> lock(optimizer_mutex_);
-        optimizer_.initializeOptimization();
+        optimizer_.initializeOptimization(0);
         optimizer_.optimize(1);
 
         // Remove edges after their use as expired
         for (auto* edge : temp_loc_edges) {
             optimizer_.removeEdge(edge);
-            //delete edge;
+            // delete edge;
+            //edge->setLevel(1);
         }
-        temp_loc_edges.clear();
     }
+    temp_loc_edges.clear();
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"Amount of edges created for localization AFTER: %ld", temp_loc_edges.size());
 
-    
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration_ms =
+        std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+    RCLCPP_INFO(
+        rclcpp::get_logger("graph_slam_solver"),
+        "localize_in_map() took %.3f ms",
+        duration_ms
+    );
 
 }
 
