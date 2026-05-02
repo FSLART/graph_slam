@@ -183,14 +183,13 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
         std::lock_guard<std::mutex> lock(optimizer_mutex_);
         optimizer_.initializeOptimization();
         optimizer_.optimize(1);
+
+        for (auto* edge : temp_loc_edges) {
+            optimizer_.removeEdge(edge);
+        }
     }
 
-    // {
-    //     std::lock_guard<std::mutex> lock(optimizer_mutex_);
-    //     for (auto* edge : temp_loc_edges) {
-    //         optimizer_.removeEdge(edge);
-    //     }
-    // }
+
     temp_loc_edges.clear();
     RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"Amount of edges created for localization AFTER: %ld", temp_loc_edges.size());
 
