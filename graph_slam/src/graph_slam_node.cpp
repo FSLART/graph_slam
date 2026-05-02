@@ -118,7 +118,12 @@ void GraphSLAM_Node::imu_callback(const geometry_msgs::msg::Vector3Stamped::Shar
     RCLCPP_DEBUG(this->get_logger(), "Received IMU angular velocity message");
     this->graph_slam_solver_->set_angular_velocity(msg);
 
-    this->graph_slam_solver_->compute_predicted_pose();
+    this->dynamics_counter++;
+
+    // Reduce the frequency of pose prediction
+    if(this->dynamics_counter % 3 == 0){
+        this->graph_slam_solver_->compute_predicted_pose();
+    }
 }
 
 void GraphSLAM_Node::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg){

@@ -40,6 +40,9 @@ private:
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     void broadcast_transform();
     lart_msgs::msg::ConeArray create_map_markers(visualization_msgs::msg::MarkerArray cones);
+
+    //frame counters
+    long dynamics_counter;
 protected:
     GraphSLAM *graph_slam_solver_;
 };

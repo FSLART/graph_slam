@@ -123,7 +123,7 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
 
     // For each observation, find the nearest landmark in the map using the KD-tree
     std::vector<g2o::HyperGraph::Edge*> temp_loc_edges; // Store aux edges
-    std::vector<int> matches(observations.size(), -1); // Initialize all matches to -1 (no match)
+    auto* pose_vertex = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id));
     for (size_t i = 0; i < obs_global.size(); ++i) {
         const auto& obs = obs_global[i];
         pcl::PointXYZ search_point(static_cast<float>(obs.x), static_cast<float>(obs.y), 0.0f);
@@ -134,23 +134,18 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
         if (map_kdtree_.nearestKSearch(search_point, 1, point_idx_nkn_search, point_nkn_squared_distance) > 0) {
 
             int idx = point_idx_nkn_search[0];
-            // const auto& matched_landmark_info = map_kdtree_landmarks_[idx];
-            // matches[i] = static_cast<int>(matched_landmark_info.vertex_id);
 
             // Add edge between current pose and matched landmark
             g2o::EdgeSE2PointXY* edge = new g2o::EdgeSE2PointXY();
 
+            auto* landmark_vertex = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(map_kdtree_landmarks_[idx].vertex_id));
+            if (!pose_vertex || !landmark_vertex) {
+                RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Null vertex detected, skipping edge.");
+                delete edge;
+                continue;
+            }
+
             {
-                auto* pose_vertex = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id));
-
-                auto* landmark_vertex = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(map_kdtree_landmarks_[idx].vertex_id));
-
-                if (!pose_vertex || !landmark_vertex) {
-                    RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Null vertex detected, skipping edge.");
-                    delete edge;
-                    continue;
-                }
-
                 std::lock_guard<std::mutex> lock(optimizer_mutex_);
                 edge->setVertex(0, pose_vertex);
                 edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(map_kdtree_landmarks_[idx].vertex_id)));
@@ -186,16 +181,16 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
     // Preform optimization
     {
         std::lock_guard<std::mutex> lock(optimizer_mutex_);
-        optimizer_.initializeOptimization(0);
+        optimizer_.initializeOptimization();
         optimizer_.optimize(1);
-
-        // Remove edges after their use as expired
-        for (auto* edge : temp_loc_edges) {
-            optimizer_.removeEdge(edge);
-            // delete edge;
-            //edge->setLevel(1);
-        }
     }
+
+    // {
+    //     std::lock_guard<std::mutex> lock(optimizer_mutex_);
+    //     for (auto* edge : temp_loc_edges) {
+    //         optimizer_.removeEdge(edge);
+    //     }
+    // }
     temp_loc_edges.clear();
     RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"Amount of edges created for localization AFTER: %ld", temp_loc_edges.size());
 
