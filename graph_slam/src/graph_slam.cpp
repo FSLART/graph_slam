@@ -101,13 +101,6 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
 
     auto start_time = std::chrono::steady_clock::now();
 
-    // Testing to see what happens if the rate of update is slower
-    if(this->count_locliz_updts_ < 10){
-        this->count_locliz_updts_++;
-        return;
-    }
-    this->count_locliz_updts_ = 0;
-
     // Transform observations to global frame
     std::vector<graph_slam_types::Cone> obs_global;
 
@@ -387,14 +380,24 @@ void GraphSLAM::process_dynamics(const lart_msgs::msg::Dynamics::SharedPtr msg)
     float current_rpm = (float)msg->rpm;
     float ms_speed = RPM_TO_MS(current_rpm);
     this->velocity_ = ms_speed;
-
     RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received Dynamics message: %f", ms_speed);
+
+    float delta_vel = std::abs(this->velocity_ - this->last_velocity_);
+    if(delta_vel > 0.1){ // Only trigger a pose prediction if the change is greater than 0.1 m/s to avoid noise
+        compute_predicted_pose();
+    }
 }
 
 void GraphSLAM::set_angular_velocity(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg)
 {
     this->angular_velocity_ = msg->vector.z;
     RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received IMU angular velocity message: %f", this->angular_velocity_);
+
+    //Only trigger a pose prediction if the change is greater than the sensor noise
+    float delta_ang_vel = std::abs(this->angular_velocity_ - this->last_angular_velocity_);
+    if(delta_ang_vel > IMU_NOISE){
+        compute_predicted_pose();
+    }
 }
 
 void GraphSLAM::set_mission(const lart_msgs::msg::Mission::SharedPtr msg)
@@ -479,6 +482,10 @@ void GraphSLAM::compute_predicted_pose()
         this->optimizer_.addEdge(odom_edge);
         this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
     }
+
+    //Save used information to manage prediction trigger
+    this->last_velocity_ = this->velocity_;
+    this->last_angular_velocity_ = this->angular_velocity_;
 }
 
 void GraphSLAM::check_lap_completion()
