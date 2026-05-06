@@ -63,6 +63,7 @@ public:
     void set_angular_velocity(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
     void set_mission(const lart_msgs::msg::Mission::SharedPtr msg);
     void compute_predicted_pose();
+    void create_pose_vertex();
     Eigen::Vector3d get_current_pose();
     g2o::SparseOptimizer optimizer_;
     int get_lap(){return current_lap_;};
@@ -76,9 +77,7 @@ private:
     //Pose estimation
     Eigen::Vector3d current_pose_{0.0, 0.0, 0.0}; // x, y, theta
     float velocity_ = 0.0;
-    float last_velocity_ = 0.0;
     float angular_velocity_ = 0.0;
-    float last_angular_velocity_ = 0.0;
     std::chrono::steady_clock::time_point last_predict_time_{};
     //Mutexes
     std::mutex pose_mutex_;

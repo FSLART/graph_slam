@@ -42,7 +42,7 @@ private:
     lart_msgs::msg::ConeArray create_map_markers(visualization_msgs::msg::MarkerArray cones);
 
     //frame counters
-    long dynamics_counter;
+    uint8_t dynamics_counter = 0;
 protected:
     GraphSLAM *graph_slam_solver_;
 };

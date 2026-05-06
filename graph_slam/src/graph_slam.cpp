@@ -218,6 +218,9 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
         }
         return this->get_map(not_added_observations); // Skip processing if the robot is not moving
     }
+
+    // Create a new pose vertex for normal and localization mode
+    create_pose_vertex();
     
     auto start_time = std::chrono::steady_clock::now();
     RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received ConeArray with %zu cones.", msg->cones.size());
@@ -381,23 +384,12 @@ void GraphSLAM::process_dynamics(const lart_msgs::msg::Dynamics::SharedPtr msg)
     float ms_speed = RPM_TO_MS(current_rpm);
     this->velocity_ = ms_speed;
     RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received Dynamics message: %f", ms_speed);
-
-    float delta_vel = std::abs(this->velocity_ - this->last_velocity_);
-    if(delta_vel > 0.1){ // Only trigger a pose prediction if the change is greater than 0.1 m/s to avoid noise
-        compute_predicted_pose();
-    }
 }
 
 void GraphSLAM::set_angular_velocity(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg)
 {
     this->angular_velocity_ = msg->vector.z;
     RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received IMU angular velocity message: %f", this->angular_velocity_);
-
-    //Only trigger a pose prediction if the change is greater than the sensor noise
-    float delta_ang_vel = std::abs(this->angular_velocity_ - this->last_angular_velocity_);
-    if(delta_ang_vel > IMU_NOISE){
-        compute_predicted_pose();
-    }
 }
 
 void GraphSLAM::set_mission(const lart_msgs::msg::Mission::SharedPtr msg)
@@ -464,6 +456,29 @@ void GraphSLAM::compute_predicted_pose()
     // Normalize angle to [-pi, pi]
     current_pose_[2] = atan2(sin(current_pose_[2]), cos(current_pose_[2]));
 
+    // {
+    //     std::lock_guard<std::mutex> lock(optimizer_mutex_);
+    //     VertexSE2* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
+        
+    //     VertexSE2* new_pose_vertex =  new VertexSE2();
+    //     new_pose_vertex->setId(++pose_id_counter_);
+    //     new_pose_vertex->setEstimate(SE2(current_pose_[0], current_pose_[1], current_pose_[2]));
+    //     optimizer_.addVertex(new_pose_vertex);
+    //     this->new_vertices.insert(new_pose_vertex); // Add new pose vertex for update bookkeeping
+        
+    //     EdgeSE2* odom_edge = new EdgeSE2();
+    //     odom_edge->setVertex(0, current_pose_vertex);
+    //     odom_edge->setVertex(1, new_pose_vertex);
+    //     odom_edge->setMeasurement(SE2(dx, dy, w * dt));
+    //     odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
+    //     this->optimizer_.addEdge(odom_edge);
+    //     this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
+    // }
+
+}
+
+void GraphSLAM::create_pose_vertex()
+{
     {
         std::lock_guard<std::mutex> lock(optimizer_mutex_);
         VertexSE2* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
@@ -477,16 +492,19 @@ void GraphSLAM::compute_predicted_pose()
         EdgeSE2* odom_edge = new EdgeSE2();
         odom_edge->setVertex(0, current_pose_vertex);
         odom_edge->setVertex(1, new_pose_vertex);
-        odom_edge->setMeasurement(SE2(dx, dy, w * dt));
+        
+        // Compute relative diference between poses STILL NEED TO CHECK IF THIS IS CORRECT
+        double dx = current_pose_[0] - current_pose_vertex->estimate().x();
+        double dy = current_pose_[1] - current_pose_vertex->estimate().y();
+        double dtheta = current_pose_[2] - current_pose_vertex->estimate().theta();
+
+        odom_edge->setMeasurement(SE2(dx, dy, dtheta));
         odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
         this->optimizer_.addEdge(odom_edge);
         this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
     }
-
-    //Save used information to manage prediction trigger
-    this->last_velocity_ = this->velocity_;
-    this->last_angular_velocity_ = this->angular_velocity_;
 }
+
 
 void GraphSLAM::check_lap_completion()
 {
