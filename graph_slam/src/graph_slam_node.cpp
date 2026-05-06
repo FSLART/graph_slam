@@ -125,7 +125,6 @@ void GraphSLAM_Node::imu_callback(const geometry_msgs::msg::Vector3Stamped::Shar
     }
     this->dynamics_counter = 0;
     this->graph_slam_solver_->compute_predicted_pose();
-
 }
 
 void GraphSLAM_Node::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg){

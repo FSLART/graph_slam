@@ -63,7 +63,6 @@ public:
     void set_angular_velocity(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
     void set_mission(const lart_msgs::msg::Mission::SharedPtr msg);
     void compute_predicted_pose();
-    void create_pose_vertex();
     Eigen::Vector3d get_current_pose();
     g2o::SparseOptimizer optimizer_;
     int get_lap(){return current_lap_;};
