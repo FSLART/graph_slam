@@ -116,7 +116,7 @@ private:
     void build_map_kdtree();
     
     void update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset);
-    void localize_in_map(std::vector<graph_slam_types::Cone>& observations, long current_pose_id, Eigen::Vector3d robot_pose);
+    void localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose);
     visualization_msgs::msg::MarkerArray get_map(std::vector<graph_slam_types::Cone> cones = {});
 
 protected:

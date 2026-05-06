@@ -92,7 +92,7 @@ void GraphSLAM::build_map_kdtree()
     RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "KD-tree built with %zu landmarks.", map_cloud_->points.size());
 }
 
-void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observations, long current_pose_id, Eigen::Vector3d robot_pose)
+void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose)
 {
     if (!map_kdtree_ready_) {
         RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Localization requested but KD-tree is not ready.");
@@ -101,98 +101,114 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
 
     auto start_time = std::chrono::steady_clock::now();
 
+    std::vector<Eigen::Vector2d> matched_map_pts;
+    std::vector<Eigen::Vector2d> matched_obs_pts;
+
     // Transform observations to global frame
-    std::vector<graph_slam_types::Cone> obs_global;
+    double cos_theta = std::cos(robot_pose[2]);
+    double sin_theta = std::sin(robot_pose[2]);
 
     for (const auto& obs : observations) {
-        graph_slam_types::Cone global_obs;
-        double cos_theta = std::cos(robot_pose[2]);
-        double sin_theta = std::sin(robot_pose[2]);
-        global_obs.x = robot_pose[0] + obs.x * cos_theta - obs.y * sin_theta;
-        global_obs.y = robot_pose[1] + obs.x * sin_theta + obs.y * cos_theta;
-        global_obs.type = obs.type;
-        obs_global.push_back(global_obs);
-    }
+        double gx = robot_pose[0] + obs.x * cos_theta - obs.y * sin_theta;
+        double gy = robot_pose[1] + obs.x * sin_theta + obs.y * cos_theta;
 
-    // For each observation, find the nearest landmark in the map using the KD-tree
-    std::vector<g2o::HyperGraph::Edge*> temp_loc_edges; // Store aux edges
-    auto* pose_vertex = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id));
-    for (size_t i = 0; i < obs_global.size(); ++i) {
-        const auto& obs = obs_global[i];
-        pcl::PointXYZ search_point(static_cast<float>(obs.x), static_cast<float>(obs.y), 0.0f);
-
+        // For each observation, find the nearest landmark in the map using the KD-tree
+        pcl::PointXYZ search_point(static_cast<float>(gx), static_cast<float>(gy), 0.0f);
         std::vector<int> point_idx_nkn_search(1);
         std::vector<float> point_nkn_squared_distance(1);
 
-        if (map_kdtree_.nearestKSearch(search_point, 1, point_idx_nkn_search, point_nkn_squared_distance) > 0) {
+        if(map_kdtree_.nearestKSearch(search_point, 1, point_idx_nkn_search, point_nkn_squared_distance) > 0){
 
-            int idx = point_idx_nkn_search[0];
-
-            // Add edge between current pose and matched landmark
-            g2o::EdgeSE2PointXY* edge = new g2o::EdgeSE2PointXY();
-
-            auto* landmark_vertex = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(map_kdtree_landmarks_[idx].vertex_id));
-            if (!pose_vertex || !landmark_vertex) {
-                RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Null vertex detected, skipping edge.");
-                delete edge;
+            //Reject far away associations
+            if(point_nkn_squared_distance[0] > 2.0f){
+                RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Observation at (%.2f, %.2f) could not be localized to any nearby landmark.", gx, gy);
                 continue;
             }
 
-            {
-                std::lock_guard<std::mutex> lock(optimizer_mutex_);
-                edge->setVertex(0, pose_vertex);
-                edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(map_kdtree_landmarks_[idx].vertex_id)));
+            auto* v_landmark = dynamic_cast<VertexLandmark2D*>(
+                optimizer_.vertex(map_kdtree_landmarks_[point_idx_nkn_search[0]].vertex_id));
+
+            if (!v_landmark) {
+                RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Matched landmark vertex not found in the graph.");
+                continue;
             }
 
-            // Set local measurement
-            edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
-            observations[i].calculate_information(robot_pose[2]);
-            edge->setInformation(observations[i].information);
-            edge->setLevel(0);
-
-            // Set robust kernel
-            auto rk = new RobustKernelHuber();
-            rk->setDelta(0.5);
-            edge->setRobustKernel(rk);
-
-            {
-                std::lock_guard<std::mutex> lock(optimizer_mutex_);
-                this->optimizer_.addEdge(edge);
-                // Store edge for later removal
-                temp_loc_edges.push_back(edge);
-            }
-           
-
-        } else {
-            RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Observation %zu could not be localized to any landmark.", i);
-
+            Eigen::Vector2d map_pt = v_landmark->estimate();
+            matched_map_pts.push_back(map_pt);
+            matched_obs_pts.emplace_back(gx, gy);
         }
     }
 
-    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"Amount of edges created for localization: %ld", temp_loc_edges.size());
+    if(matched_map_pts.size() < 3){
+        RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Not enough matched points for localization (%zu)", matched_map_pts.size());
+        return;
+    }
 
-    // Preform optimization
+    // Compute centroids
+    Eigen::Vector2d centroid_map(0, 0);
+    Eigen::Vector2d centroid_obs(0, 0);
+
+    for (size_t i = 0; i < matched_map_pts.size(); ++i) {
+        centroid_map += matched_map_pts[i];
+        centroid_obs += matched_obs_pts[i];
+    }
+
+    centroid_map /= matched_map_pts.size();
+    centroid_obs /= matched_obs_pts.size();
+
+
+    //Compute Optimial Rotation using SVD
+    Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
+
+    for (size_t i = 0; i < matched_map_pts.size(); ++i) {
+        Eigen::Vector2d pm = matched_map_pts[i] - centroid_map;
+        Eigen::Vector2d po = matched_obs_pts[i] - centroid_obs;
+        H += po * pm.transpose();
+    }
+
+    Eigen::JacobiSVD<Eigen::Matrix2d> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+    Eigen::Matrix2d R = svd.matrixV() * svd.matrixU().transpose();
+
+    // Ensure proper rotation (determinant = +1)
+    if (R.determinant() < 0) {
+        Eigen::Matrix2d V = svd.matrixV();
+        V.col(1) *= -1;
+        R = V * svd.matrixU().transpose();
+    }
+
+    // Compute translation
+    Eigen::Vector2d t = centroid_map - R * centroid_obs;
+
+    // Extract correction
+    double delta_theta = std::atan2(R(1, 0), R(0, 0));
+
+    // Configure damping
+    double alpha = 0.5;
+
+    //Apply correction to robot pose
     {
-        std::lock_guard<std::mutex> lock(optimizer_mutex_);
-        optimizer_.initializeOptimization();
-        optimizer_.optimize(1);
+        std::lock_guard<std::mutex> lock(pose_mutex_);
+        current_pose_[0] += alpha * t.x();
+        current_pose_[1] += alpha * t.y();
+        current_pose_[2] += alpha * delta_theta;
 
-        for (auto* edge : temp_loc_edges) {
-            optimizer_.removeEdge(edge);
-        }
+        // Normalize angle to [-pi, pi]
+        current_pose_[2] = std::atan2(std::sin(current_pose_[2]), std::cos(current_pose_[2]));
     }
 
-
-    temp_loc_edges.clear();
-    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"Amount of edges created for localization AFTER: %ld", temp_loc_edges.size());
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),
+        "ICP correction: dx=%.3f dy=%.3f dtheta=%.3f (matches=%zu)",
+        t.x(), t.y(), delta_theta, matched_map_pts.size());
 
     auto end_time = std::chrono::steady_clock::now();
     auto duration_ms =
         std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
+    // This function is absolute black magic
     RCLCPP_INFO(
         rclcpp::get_logger("graph_slam_solver"),
-        "localize_in_map() took %.3f ms",
+        "The Dark incantation required %.3f ms",
         duration_ms
     );
 
@@ -247,7 +263,8 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
 
         // Use localization mode
         if (localization_mode_) {
-            localize_in_map(observations, current_pose_id, robot_pose_);
+            localize_in_map(observations, robot_pose_);
+            check_lap_completion();
             return final_map_;
         }
 
@@ -453,23 +470,26 @@ void GraphSLAM::compute_predicted_pose()
     // Normalize angle to [-pi, pi]
     current_pose_[2] = atan2(sin(current_pose_[2]), cos(current_pose_[2]));
 
-    {
-        std::lock_guard<std::mutex> lock(optimizer_mutex_);
-        VertexSE2* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
-        
-        VertexSE2* new_pose_vertex =  new VertexSE2();
-        new_pose_vertex->setId(++pose_id_counter_);
-        new_pose_vertex->setEstimate(SE2(current_pose_[0], current_pose_[1], current_pose_[2]));
-        optimizer_.addVertex(new_pose_vertex);
-        this->new_vertices.insert(new_pose_vertex); // Add new pose vertex for update bookkeeping
-        
-        EdgeSE2* odom_edge = new EdgeSE2();
-        odom_edge->setVertex(0, current_pose_vertex);
-        odom_edge->setVertex(1, new_pose_vertex);
-        odom_edge->setMeasurement(SE2(dx, dy, w * dt));
-        odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
-        this->optimizer_.addEdge(odom_edge);
-        this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
+    if(!localization_mode_){
+        // Update the current pose vertex in the graph
+        {
+            std::lock_guard<std::mutex> lock(optimizer_mutex_);
+            VertexSE2* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
+            
+            VertexSE2* new_pose_vertex =  new VertexSE2();
+            new_pose_vertex->setId(++pose_id_counter_);
+            new_pose_vertex->setEstimate(SE2(current_pose_[0], current_pose_[1], current_pose_[2]));
+            optimizer_.addVertex(new_pose_vertex);
+            this->new_vertices.insert(new_pose_vertex); // Add new pose vertex for update bookkeeping
+            
+            EdgeSE2* odom_edge = new EdgeSE2();
+            odom_edge->setVertex(0, current_pose_vertex);
+            odom_edge->setVertex(1, new_pose_vertex);
+            odom_edge->setMeasurement(SE2(dx, dy, w * dt));
+            odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
+            this->optimizer_.addEdge(odom_edge);
+            this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
+        }
     }
 
 }
