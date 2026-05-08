@@ -528,7 +528,7 @@ void GraphSLAM::check_lap_completion()
     if (lap_completed) {
         this->current_lap_++;
         this->current_lap_distance_ = 0.0; // Reset distance for the next lap
-        if (this->current_lap_ == 1) {
+        if (this->current_lap_ == 1 && this->localization_mode_ == false) {
             this->localization_mode_ = true; 
             {
                 std::lock_guard<std::mutex> lock(optimizer_mutex_);
