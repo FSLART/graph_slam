@@ -92,126 +92,285 @@ void GraphSLAM::build_map_kdtree()
     RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "KD-tree built with %zu landmarks.", map_cloud_->points.size());
 }
 
-void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose)
+void GraphSLAM::localize_in_map(
+    std::vector<graph_slam_types::Cone>& observations,
+    Eigen::Vector3d robot_pose)
 {
     if (!map_kdtree_ready_) {
-        RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Localization requested but KD-tree is not ready.");
+        RCLCPP_WARN(
+            rclcpp::get_logger("graph_slam_solver"),
+            "Localization requested but KD-tree is not ready.");
         return;
     }
 
     auto start_time = std::chrono::steady_clock::now();
 
-    std::vector<Eigen::Vector2d> matched_map_pts;
-    std::vector<Eigen::Vector2d> matched_obs_pts;
+    // Initial pose estimate from odometry
+    Eigen::Vector3d pose_est = robot_pose;
 
-    // Transform observations to global frame
-    double cos_theta = std::cos(robot_pose[2]);
-    double sin_theta = std::sin(robot_pose[2]);
+    constexpr int max_icp_iterations = 5;
+    constexpr double max_match_distance_sq = 1.0; // 1 meter squared
+    constexpr double alpha = 0.2;                 // damping factor
 
-    for (const auto& obs : observations) {
-        double gx = robot_pose[0] + obs.x * cos_theta - obs.y * sin_theta;
-        double gy = robot_pose[1] + obs.x * sin_theta + obs.y * cos_theta;
+    for (int iter = 0; iter < max_icp_iterations; ++iter) {
 
-        // For each observation, find the nearest landmark in the map using the KD-tree
-        pcl::PointXYZ search_point(static_cast<float>(gx), static_cast<float>(gy), 0.0f);
-        std::vector<int> point_idx_nkn_search(1);
-        std::vector<float> point_nkn_squared_distance(1);
+        std::vector<Eigen::Vector2d> matched_map_pts;
+        std::vector<Eigen::Vector2d> matched_obs_pts;
 
-        if(map_kdtree_.nearestKSearch(search_point, 1, point_idx_nkn_search, point_nkn_squared_distance) > 0){
+        // Prevent multiple observations matching same landmark
+        std::unordered_set<int> used_landmarks;
 
-            //Reject far away associations
-            if(point_nkn_squared_distance[0] > 2.0f){
-                RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Observation at (%.2f, %.2f) could not be localized to any nearby landmark.", gx, gy);
+        double cos_theta = std::cos(pose_est[2]);
+        double sin_theta = std::sin(pose_est[2]);
+
+        // ============================================================
+        // Build correspondences
+        // ============================================================
+
+        for (const auto& obs : observations) {
+
+            // Reject far observations
+            double obs_dist = std::sqrt(obs.x * obs.x + obs.y * obs.y);
+
+            if (obs_dist > 10.0)
+                continue;
+
+            // Transform observation into global frame
+            double gx =
+                pose_est[0] +
+                obs.x * cos_theta -
+                obs.y * sin_theta;
+
+            double gy =
+                pose_est[1] +
+                obs.x * sin_theta +
+                obs.y * cos_theta;
+
+            pcl::PointXYZ search_point(
+                static_cast<float>(gx),
+                static_cast<float>(gy),
+                0.0f);
+
+            std::vector<int> point_idx_nkn_search(1);
+            std::vector<float> point_nkn_squared_distance(1);
+
+            if (map_kdtree_.nearestKSearch(
+                    search_point,
+                    1,
+                    point_idx_nkn_search,
+                    point_nkn_squared_distance) <= 0)
+            {
                 continue;
             }
 
-            auto* v_landmark = dynamic_cast<VertexLandmark2D*>(
-                optimizer_.vertex(map_kdtree_landmarks_[point_idx_nkn_search[0]].vertex_id));
+            int idx = point_idx_nkn_search[0];
 
-            if (!v_landmark) {
-                RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Matched landmark vertex not found in the graph.");
+            // Reject distant matches
+            if (point_nkn_squared_distance[0] > max_match_distance_sq)
                 continue;
-            }
+
+            // One-to-one matching only
+            if (used_landmarks.count(idx))
+                continue;
+
+            // Landmark lookup
+            auto* v_landmark =
+                dynamic_cast<VertexLandmark2D*>(
+                    optimizer_.vertex(
+                        map_kdtree_landmarks_[idx].vertex_id));
+
+            if (!v_landmark)
+                continue;
+
+            // Match cone colors only
+            if (obs.type != v_landmark->color())
+                continue;
+
+            used_landmarks.insert(idx);
 
             Eigen::Vector2d map_pt = v_landmark->estimate();
+
             matched_map_pts.push_back(map_pt);
             matched_obs_pts.emplace_back(gx, gy);
         }
+
+        // ============================================================
+        // Validate correspondence count
+        // ============================================================
+
+        if (matched_map_pts.size() < 3) {
+
+            RCLCPP_WARN(
+                rclcpp::get_logger("graph_slam_solver"),
+                "ICP iteration %d failed: only %zu matches",
+                iter,
+                matched_map_pts.size());
+
+            return;
+        }
+
+        // ============================================================
+        // Compute centroids
+        // ============================================================
+
+        Eigen::Vector2d centroid_map(0, 0);
+        Eigen::Vector2d centroid_obs(0, 0);
+
+        for (size_t i = 0; i < matched_map_pts.size(); ++i) {
+
+            centroid_map += matched_map_pts[i];
+            centroid_obs += matched_obs_pts[i];
+        }
+
+        centroid_map /= matched_map_pts.size();
+        centroid_obs /= matched_obs_pts.size();
+
+        // ============================================================
+        // Compute covariance matrix
+        // ============================================================
+
+        Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
+
+        for (size_t i = 0; i < matched_map_pts.size(); ++i) {
+
+            Eigen::Vector2d pm =
+                matched_map_pts[i] - centroid_map;
+
+            Eigen::Vector2d po =
+                matched_obs_pts[i] - centroid_obs;
+
+            H += po * pm.transpose();
+        }
+
+        // ============================================================
+        // SVD solve
+        // ============================================================
+
+        Eigen::JacobiSVD<Eigen::Matrix2d> svd(
+            H,
+            Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+        // Reject degenerate geometry
+        if (svd.singularValues()(1) < 0.01) {
+
+            RCLCPP_WARN(
+                rclcpp::get_logger("graph_slam_solver"),
+                "Degenerate ICP geometry");
+
+            return;
+        }
+
+        Eigen::Matrix2d R =
+            svd.matrixV() *
+            svd.matrixU().transpose();
+
+        // Ensure proper rotation
+        if (R.determinant() < 0) {
+
+            Eigen::Matrix2d V = svd.matrixV();
+            V.col(1) *= -1;
+
+            R = V * svd.matrixU().transpose();
+        }
+
+        // ============================================================
+        // Translation
+        // ============================================================
+
+        Eigen::Vector2d t =
+            centroid_map -
+            R * centroid_obs;
+
+        double delta_theta =
+            std::atan2(R(1, 0), R(0, 0));
+
+        // ============================================================
+        // Reject insane corrections
+        // ============================================================
+
+        double translation_norm = t.norm();
+
+        if (translation_norm > 1.0 ||
+            std::abs(delta_theta) > 0.3)
+        {
+            RCLCPP_WARN(
+                rclcpp::get_logger("graph_slam_solver"),
+                "Rejecting ICP correction: "
+                "translation=%.3f rotation=%.3f",
+                translation_norm,
+                delta_theta);
+
+            return;
+        }
+
+        // ============================================================
+        // Apply correction properly
+        // ============================================================
+
+        Eigen::Rotation2Dd rot(alpha * delta_theta);
+
+        Eigen::Vector2d pose_xy(
+            pose_est[0],
+            pose_est[1]);
+
+        pose_xy =
+            rot * pose_xy +
+            alpha * t;
+
+        pose_est[0] = pose_xy.x();
+        pose_est[1] = pose_xy.y();
+        pose_est[2] += alpha * delta_theta;
+
+        // Normalize angle
+        pose_est[2] =
+            std::atan2(
+                std::sin(pose_est[2]),
+                std::cos(pose_est[2]));
+
+        // ============================================================
+        // Early convergence
+        // ============================================================
+
+        if (translation_norm < 0.01 &&
+            std::abs(delta_theta) < 0.005)
+        {
+            break;
+        }
+
+        RCLCPP_INFO(
+            rclcpp::get_logger("graph_slam_solver"),
+            "ICP iter %d | matches=%zu | "
+            "dx=%.3f dy=%.3f dtheta=%.3f",
+            iter,
+            matched_map_pts.size(),
+            t.x(),
+            t.y(),
+            delta_theta);
     }
 
-    if(matched_map_pts.size() < 3){
-        RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Not enough matched points for localization (%zu)", matched_map_pts.size());
-        return;
-    }
+    // ================================================================
+    // Commit final pose estimate
+    // ================================================================
 
-    // Compute centroids
-    Eigen::Vector2d centroid_map(0, 0);
-    Eigen::Vector2d centroid_obs(0, 0);
-
-    for (size_t i = 0; i < matched_map_pts.size(); ++i) {
-        centroid_map += matched_map_pts[i];
-        centroid_obs += matched_obs_pts[i];
-    }
-
-    centroid_map /= matched_map_pts.size();
-    centroid_obs /= matched_obs_pts.size();
-
-
-    //Compute Optimial Rotation using SVD
-    Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
-
-    for (size_t i = 0; i < matched_map_pts.size(); ++i) {
-        Eigen::Vector2d pm = matched_map_pts[i] - centroid_map;
-        Eigen::Vector2d po = matched_obs_pts[i] - centroid_obs;
-        H += po * pm.transpose();
-    }
-
-    Eigen::JacobiSVD<Eigen::Matrix2d> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
-
-    Eigen::Matrix2d R = svd.matrixV() * svd.matrixU().transpose();
-
-    // Ensure proper rotation (determinant = +1)
-    if (R.determinant() < 0) {
-        Eigen::Matrix2d V = svd.matrixV();
-        V.col(1) *= -1;
-        R = V * svd.matrixU().transpose();
-    }
-
-    // Compute translation
-    Eigen::Vector2d t = centroid_map - R * centroid_obs;
-
-    // Extract correction
-    double delta_theta = std::atan2(R(1, 0), R(0, 0));
-
-    // Configure damping
-    double alpha = 0.5;
-
-    //Apply correction to robot pose
     {
         std::lock_guard<std::mutex> lock(pose_mutex_);
-        current_pose_[0] += alpha * t.x();
-        current_pose_[1] += alpha * t.y();
-        current_pose_[2] += alpha * delta_theta;
-
-        // Normalize angle to [-pi, pi]
-        current_pose_[2] = std::atan2(std::sin(current_pose_[2]), std::cos(current_pose_[2]));
+        current_pose_ = pose_est;
     }
 
-    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),
-        "ICP correction: dx=%.3f dy=%.3f dtheta=%.3f (matches=%zu)",
-        t.x(), t.y(), delta_theta, matched_map_pts.size());
-
     auto end_time = std::chrono::steady_clock::now();
-    auto duration_ms =
-        std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
-    // This function is absolute black magic
+    auto duration_ms =
+        std::chrono::duration<double, std::milli>(
+            end_time - start_time).count();
+
     RCLCPP_INFO(
         rclcpp::get_logger("graph_slam_solver"),
-        "The Dark incantation required %.3f ms",
-        duration_ms
-    );
-
+        "ICP localization completed in %.3f ms | "
+        "Final pose: x=%.2f y=%.2f theta=%.2f",
+        duration_ms,
+        current_pose_[0],
+        current_pose_[1],
+        current_pose_[2]);
 }
 
 Eigen::Vector3d GraphSLAM::get_current_pose()
