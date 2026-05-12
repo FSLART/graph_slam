@@ -141,7 +141,7 @@ public:
         auto start_time = std::chrono::steady_clock::now();
         std::vector<graph_slam_types::Cone> obs_global = obsToGlobal(observations, pose);
         std::vector<int> associations(observations.size(), -1);
-
+        std::map<int, std::pair<double, int>> best_matches;
         // Chi-squared threshold for 2 degrees of freedom (x, y) 
         const double threshold = 3.9;
 
@@ -150,6 +150,7 @@ public:
             int best_idx = -1;
 
             Eigen::Vector2d z(obs_global[i].x, obs_global[i].y);
+            double d2 = 0.0;
 
             for (size_t j = 0; j < map_cones.size(); ++j) {
                 // Only match cones of the same type (color)
@@ -160,7 +161,7 @@ public:
 
                 // Mahalanobis distance: d^2 = diff^T * S^-1 * diff
                 // Note: Since S^-1 is the information matrix, we can use it directly!
-                double d2 = diff.transpose() * obs_global[i].information * diff;
+                d2 = diff.transpose() * obs_global[i].information * diff;
 
                 if (d2 < threshold && d2 < min_dist) {
                     min_dist = d2;
@@ -169,7 +170,13 @@ public:
             }
 
             if (best_idx != -1) {
-                associations[i] = map_cones[best_idx].id;
+                if (best_matches.find(best_idx) == best_matches.end() || d2 < best_matches[best_idx].first) {
+                    if (best_matches.find(best_idx) != best_matches.end()) {
+                        associations[best_matches[best_idx].second] = -1;
+                    }
+                    best_matches[best_idx] = {d2, i};
+                    associations[i] = map_cones[best_idx].id;
+                }
             }
         }
 

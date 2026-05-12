@@ -20,9 +20,7 @@
 #include <visualization_msgs/msg/marker.hpp>
 
 #include <chrono>
-#include <map>
 #include <ament_index_cpp/get_package_share_directory.hpp>
-#include <string>
 
 #include <g2o/core/sparse_optimizer.h>
 #include <g2o/core/optimization_algorithm_levenberg.h>
