@@ -39,7 +39,7 @@ private:
 
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     void broadcast_transform();
-    lart_msgs::msg::ConeArray create_map_markers(visualization_msgs::msg::MarkerArray cones);
+    lart_msgs::msg::ConeArray create_map_cones(visualization_msgs::msg::MarkerArray cones);
 
     //frame counters
     uint8_t dynamics_counter = 0;

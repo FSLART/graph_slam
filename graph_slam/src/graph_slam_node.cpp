@@ -96,7 +96,7 @@ void GraphSLAM_Node::broadcast_transform(){
 void GraphSLAM_Node::observations_callback(const lart_msgs::msg::ConeArray::SharedPtr msg){
     RCLCPP_DEBUG(this->get_logger(), "Received cone observations");
     visualization_msgs::msg::MarkerArray map_cones_markers = this->graph_slam_solver_->process_observations(msg);
-    lart_msgs::msg::ConeArray map_cones_msg_ = this->create_map_markers(map_cones_markers);
+    lart_msgs::msg::ConeArray map_cones_msg_ = this->create_map_cones(map_cones_markers);
 
     this->map_markers_publisher_->publish(map_cones_markers);
     this->map_publisher_->publish(map_cones_msg_);
@@ -132,7 +132,7 @@ void GraphSLAM_Node::mission_callback(const lart_msgs::msg::Mission::SharedPtr m
     this->graph_slam_solver_->set_mission(msg);
 }
 
-lart_msgs::msg::ConeArray GraphSLAM_Node::create_map_markers(visualization_msgs::msg::MarkerArray cones){
+lart_msgs::msg::ConeArray GraphSLAM_Node::create_map_cones(visualization_msgs::msg::MarkerArray cones){
     
     lart_msgs::msg::ConeArray map_cones_msg;
     for (const auto& marker : cones.markers) {

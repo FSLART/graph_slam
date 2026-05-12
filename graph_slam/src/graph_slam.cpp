@@ -577,11 +577,15 @@ void GraphSLAM::set_mission(const lart_msgs::msg::Mission::SharedPtr msg)
             {
                 std::lock_guard<std::mutex> lock(optimizer_mutex_);
                 landmark_id_counter_ = MapManager::load_map(map_path, this->optimizer_);
+                this->build_map_kdtree();
+                this->localization_mode_ = true;
                 RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Skidpad map loaded with %zu vertices.", this->optimizer_.vertices().size());
             }
+            this->final_map_ = this->get_map();
         }
-        if (this->current_mission_.data == lart_msgs::msg::Mission::ACCELERATION)
+        if (this->current_mission_.data == lart_msgs::msg::Mission::ACCELERATION) {
             this->current_lap_++ ;
+        }
     } else {
         RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Mission already set. Ignoring new mission message.");
     }
@@ -831,33 +835,43 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
             const Eigen::Vector2d &est = v_landmark->estimate();
             g2o::EdgeSE2PointXY* most_recent_edge = nullptr;
             int max_pose_id = -1;
-            if (v_landmark->edges().empty()) {
-                continue; // Skip landmarks with no edges, as we have no information about their uncertainty
-            }
-            for (auto* edge_base : v_landmark->edges()) {
-                auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);
-                if (!e_se2xy) continue;
-
-                int current_pose_id = e_se2xy->vertex(0)->id();
-
-                if (current_pose_id > max_pose_id) {
-                    max_pose_id = current_pose_id;
-                    most_recent_edge = e_se2xy;
+            if (!v_landmark->edges().empty()) {
+                for (auto* edge_base : v_landmark->edges()) {
+                    auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);
+                    if (!e_se2xy) continue;
+    
+                    int current_pose_id = e_se2xy->vertex(0)->id();
+    
+                    if (current_pose_id > max_pose_id) {
+                        max_pose_id = current_pose_id;
+                        most_recent_edge = e_se2xy;
+                    }
                 }
+                const Eigen::Matrix2d &info = most_recent_edge->information();
+                Eigen::Matrix2d cov = info.inverse();
+    
+                auto m    = make_marker(v_landmark->id(), est[0], est[1]);
+                m.scale.x = std::sqrt(cov(0,0)) * 2.0;
+                m.scale.y = std::sqrt(cov(1,1)) * 2.0;
+                m.scale.z = 0.4;
+    
+                auto it = kConeColors.find(v_landmark->color());
+                const auto& rgb = (it != kConeColors.end()) ? it->second : std::array{1.f,1.f,1.f};
+                m.color.r = rgb[0]; m.color.g = rgb[1]; m.color.b = rgb[2];
+    
+                map_markers_.markers.push_back(std::move(m));        
+            }else{
+                auto m    = make_marker(v_landmark->id(), est[0], est[1]);
+                m.scale.x = 0.5;
+                m.scale.y = 0.5;
+                m.scale.z = 0.4;
+
+                auto it = kConeColors.find(v_landmark->color());
+                const auto& rgb = (it != kConeColors.end()) ? it->second : std::array{1.f,1.f,1.f};
+                m.color.r = rgb[0]; m.color.g = rgb[1]; m.color.b = rgb[2];
+
+                map_markers_.markers.push_back(std::move(m));
             }
-            const Eigen::Matrix2d &info = most_recent_edge->information();
-            Eigen::Matrix2d cov = info.inverse();
-
-            auto m    = make_marker(v_landmark->id(), est[0], est[1]);
-            m.scale.x = std::sqrt(cov(0,0)) * 2.0;
-            m.scale.y = std::sqrt(cov(1,1)) * 2.0;
-            m.scale.z = 0.4;
-
-            auto it = kConeColors.find(v_landmark->color());
-            const auto& rgb = (it != kConeColors.end()) ? it->second : std::array{1.f,1.f,1.f};
-            m.color.r = rgb[0]; m.color.g = rgb[1]; m.color.b = rgb[2];
-
-            map_markers_.markers.push_back(std::move(m));        
         }
     }
     return map_markers_;
