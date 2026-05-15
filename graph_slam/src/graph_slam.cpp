@@ -168,8 +168,9 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
         }
 
         // Check color compatibility 
-        if (v_landmark->color() != obs.type)
+        if (v_landmark->color() != obs.type){
             continue;
+        }
 
         used_landmarks.insert(landmark_idx);
 
