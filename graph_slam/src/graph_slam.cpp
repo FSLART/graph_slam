@@ -92,9 +92,7 @@ void GraphSLAM::build_map_kdtree()
     RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "KD-tree built with %zu landmarks.", map_cloud_->points.size());
 }
 
-void GraphSLAM::localize_in_map(
-    std::vector<graph_slam_types::Cone>& observations,
-    Eigen::Vector3d robot_pose)
+void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose)
 {
     if (!map_kdtree_ready_) {
         RCLCPP_WARN(
@@ -105,48 +103,23 @@ void GraphSLAM::localize_in_map(
 
     auto start_time = std::chrono::steady_clock::now();
 
-    // ============================================================
     // Initial estimate from odometry
-    // ============================================================
-
     Eigen::Vector3d pose_est = robot_pose;
 
-    // ============================================================
     // Build temporary optimization problem
-    // ============================================================
-
     SparseOptimizer local_optimizer;
 
-    auto linearSolver =
-        std::make_unique<SlamLinearSolver>();
-
-    auto* solver =
-        new OptimizationAlgorithmLevenberg(
-            std::make_unique<SlamBlockSolver>(
-                std::move(linearSolver)));
-
+    auto linearSolver = std::make_unique<SlamLinearSolver>();
+    auto* solver = new OptimizationAlgorithmLevenberg(std::make_unique<SlamBlockSolver>(std::move(linearSolver)));
     local_optimizer.setAlgorithm(solver);
 
-    // ============================================================
     // Current pose vertex
-    // ============================================================
-
     VertexSE2* pose_vertex = new VertexSE2();
-
     pose_vertex->setId(0);
-
-    pose_vertex->setEstimate(
-        SE2(
-            pose_est[0],
-            pose_est[1],
-            pose_est[2]));
-
+    pose_vertex->setEstimate(SE2(pose_est[0],pose_est[1],pose_est[2]));
     local_optimizer.addVertex(pose_vertex);
 
-    // ============================================================
     // Association
-    // ============================================================
-
     constexpr double max_match_distance_sq = 1.0;
 
     int edge_count = 0;
@@ -158,137 +131,83 @@ void GraphSLAM::localize_in_map(
         double obs_dist =
             std::sqrt(obs.x * obs.x + obs.y * obs.y);
 
-        if (obs_dist > 10.0)
-            continue;
-
-        // --------------------------------------------------------
+        if (obs_dist > 10.0){
+            continue; // Skip observations that are too far away, not relaible enough
+        }
+            
         // Predict global observation position
-        // --------------------------------------------------------
-
         double c = std::cos(pose_est[2]);
         double s = std::sin(pose_est[2]);
 
-        double gx =
-            pose_est[0] +
-            obs.x * c -
-            obs.y * s;
+        double gx = pose_est[0] + obs.x * c - obs.y * s;
+        double gy = pose_est[1] + obs.x * s + obs.y * c;
 
-        double gy =
-            pose_est[1] +
-            obs.x * s +
-            obs.y * c;
-
-        pcl::PointXYZ search_point(
-            static_cast<float>(gx),
-            static_cast<float>(gy),
-            0.0f);
+        pcl::PointXYZ search_point(static_cast<float>(gx), static_cast<float>(gy), 0.0f);
 
         std::vector<int> idx(1);
         std::vector<float> dist_sq(1);
 
-        if (map_kdtree_.nearestKSearch(
-                search_point,
-                1,
-                idx,
-                dist_sq) <= 0)
-        {
+        if (map_kdtree_.nearestKSearch(search_point, 1, idx, dist_sq) <= 0){
             continue;
         }
 
-        if (dist_sq[0] > max_match_distance_sq)
+        if (dist_sq[0] > max_match_distance_sq){
             continue;
+        }
 
         int landmark_idx = idx[0];
 
-        if (used_landmarks.count(landmark_idx))
+        if (used_landmarks.count(landmark_idx)){
             continue;
+        }
+            
+        auto* v_landmark =dynamic_cast<VertexLandmark2D*>(optimizer_.vertex(map_kdtree_landmarks_[landmark_idx].vertex_id));
 
-        auto* v_landmark =
-            dynamic_cast<VertexLandmark2D*>(
-                optimizer_.vertex(
-                    map_kdtree_landmarks_[landmark_idx].vertex_id));
-
-        if (!v_landmark)
+        if (!v_landmark){
             continue;
+        }
 
-        // --------------------------------------------------------
-        // Semantic consistency
-        // --------------------------------------------------------
-
+        // Check color compatibility 
         if (v_landmark->color() != obs.type)
             continue;
 
         used_landmarks.insert(landmark_idx);
 
-        // ========================================================
-        // FIXED landmark vertex
-        // ========================================================
 
-        VertexPointXY* landmark_vertex =
-            new VertexPointXY();
+        // FIXED landmark vertex
+        VertexPointXY* landmark_vertex = new VertexPointXY();
 
         landmark_vertex->setId(edge_count + 1);
-
-        landmark_vertex->setEstimate(
-            v_landmark->estimate());
-
-        landmark_vertex->setFixed(true);
-
+        landmark_vertex->setEstimate(v_landmark->estimate());
+        landmark_vertex->setFixed(true); // Fix the landmark vertex since we trust the map for localization
         local_optimizer.addVertex(landmark_vertex);
 
-        // ========================================================
         // Observation edge
-        // ========================================================
-
-        EdgeSE2PointXY* obs_edge =
-            new EdgeSE2PointXY();
+        EdgeSE2PointXY* obs_edge = new EdgeSE2PointXY();
 
         obs_edge->setVertex(0, pose_vertex);
-
         obs_edge->setVertex(1, landmark_vertex);
 
-        // IMPORTANT:
         // measurement is in ROBOT FRAME
-        obs_edge->setMeasurement(
-            Eigen::Vector2d(obs.x, obs.y));
+        obs_edge->setMeasurement(Eigen::Vector2d(obs.x, obs.y));
 
-        // ========================================================
         // Information matrix
-        // ========================================================
-
-        Eigen::Matrix2d information =
-            Eigen::Matrix2d::Identity();
-
-        double sigma =
-            0.05 + 0.02 * obs_dist;
-
-        information(0,0) =
-            1.0 / (sigma * sigma);
-
-        information(1,1) =
-            1.0 / (sigma * sigma);
-
+        Eigen::Matrix2d information = Eigen::Matrix2d::Identity();
+        double sigma = 0.05 + 0.02 * obs_dist;
+        information(0,0) = 1.0 / (sigma * sigma);
+        information(1,1) = 1.0 / (sigma * sigma);
         obs_edge->setInformation(information);
 
-        // ========================================================
         // Robust kernel
-        // ========================================================
-
         auto* rk = new RobustKernelHuber();
-
         rk->setDelta(0.5);
-
         obs_edge->setRobustKernel(rk);
-
         local_optimizer.addEdge(obs_edge);
 
         edge_count++;
     }
 
-    // ============================================================
-    // Validate
-    // ============================================================
-
+    // Validate number of matches before optimizing
     if (edge_count < 3)
     {
         RCLCPP_WARN(
@@ -299,56 +218,30 @@ void GraphSLAM::localize_in_map(
         return;
     }
 
-    // ============================================================
     // Optimize
-    // ============================================================
-
     local_optimizer.initializeOptimization();
 
     local_optimizer.optimize(5);
 
-    // ============================================================
     // Extract optimized pose
-    // ============================================================
 
-    SE2 optimized_pose =
-        pose_vertex->estimate();
+    SE2 optimized_pose = pose_vertex->estimate();
 
     Eigen::Vector3d corrected_pose;
+    corrected_pose[0] = optimized_pose.translation()[0];
+    corrected_pose[1] = optimized_pose.translation()[1];
+    corrected_pose[2] =optimized_pose.rotation().angle();
 
-    corrected_pose[0] =
-        optimized_pose.translation()[0];
+    // Safety gating to prevent large jumps in localization
+    double dx = corrected_pose[0] - robot_pose[0];
+    double dy = corrected_pose[1] - robot_pose[1];
+    double dtheta = corrected_pose[2] - robot_pose[2];
 
-    corrected_pose[1] =
-        optimized_pose.translation()[1];
+    dtheta = atan2(sin(dtheta), cos(dtheta));
 
-    corrected_pose[2] =
-        optimized_pose.rotation().angle();
+    double translation_norm = std::sqrt(dx * dx + dy * dy);
 
-    // ============================================================
-    // Safety gating
-    // ============================================================
-
-    double dx =
-        corrected_pose[0] - robot_pose[0];
-
-    double dy =
-        corrected_pose[1] - robot_pose[1];
-
-    double dtheta =
-        corrected_pose[2] - robot_pose[2];
-
-    dtheta =
-        atan2(
-            sin(dtheta),
-            cos(dtheta));
-
-    double translation_norm =
-        std::sqrt(dx * dx + dy * dy);
-
-    if (translation_norm > 1.5 ||
-        std::abs(dtheta) > 0.5)
-    {
+    if (translation_norm > 1.5 || std::abs(dtheta) > 0.5){
         RCLCPP_WARN(
             rclcpp::get_logger("graph_slam_solver"),
             "Rejecting localization correction "
@@ -360,22 +253,14 @@ void GraphSLAM::localize_in_map(
         return;
     }
 
-    // ============================================================
     // Commit pose
-    // ============================================================
-
     {
         std::lock_guard<std::mutex> lock(pose_mutex_);
-
         current_pose_ = corrected_pose;
     }
 
-    auto end_time =
-        std::chrono::steady_clock::now();
-
-    auto duration_ms =
-        std::chrono::duration<double, std::milli>(
-            end_time - start_time).count();
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
     RCLCPP_INFO(
         rclcpp::get_logger("graph_slam_solver"),
