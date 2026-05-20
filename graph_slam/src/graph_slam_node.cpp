@@ -112,6 +112,7 @@ void GraphSLAM_Node::observations_callback(const lart_msgs::msg::ConeArray::Shar
 void GraphSLAM_Node::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg){
     RCLCPP_DEBUG(this->get_logger(), "Received dynamics message");
     this->graph_slam_solver_->process_dynamics(msg);
+    this->graph_slam_solver_->compute_predicted_pose();
 }
 
 void GraphSLAM_Node::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg){
@@ -124,7 +125,6 @@ void GraphSLAM_Node::imu_callback(const geometry_msgs::msg::Vector3Stamped::Shar
         return;
     }
     this->dynamics_counter = 0;
-    this->graph_slam_solver_->compute_predicted_pose();
 }
 
 void GraphSLAM_Node::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg){
