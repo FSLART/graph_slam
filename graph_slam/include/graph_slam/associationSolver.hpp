@@ -10,6 +10,7 @@
 #include <map>
 #include <algorithm>
 #include <iostream>
+#include <fstream>
 
 #include <pcl/registration/icp.h>
 #include <pcl/point_cloud.h>

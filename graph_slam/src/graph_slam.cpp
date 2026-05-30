@@ -291,6 +291,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
             cone.x = cone_msg.position.x;
             cone.y = cone_msg.position.y;
             cone.type = cone_msg.class_type.data;
+            cone.id = cone_msg.cone_id.data;
             not_added_observations.push_back(cone);
         }
         return this->get_map(not_added_observations); // Skip processing if the robot is not moving
@@ -319,6 +320,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
             cone.x = cone_msg.position.x;
             cone.y = cone_msg.position.y;
             cone.type = cone_msg.class_type.data;
+            cone.id = cone_msg.cone_id.data;
             observations.push_back(cone);
         }
 
@@ -398,7 +400,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
                 RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Observation %zu associated with map cone %d.", i, matches[i]);
             } else {
                 VertexLandmark2D* landmark = new VertexLandmark2D();
-                landmark->setId(++landmark_id_counter_);
+                landmark->setId(observations[i].id);
                 landmark->setEstimate(Eigen::Vector2d(obs_global[i].x, obs_global[i].y));
                 landmark->setColor(observations[i].type);
                 {
@@ -407,7 +409,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
                 }
                 this->new_vertices.insert(landmark); // Add new landmark vertex for update bookeeping
     
-                landmark_id = landmark_id_counter_;
+                landmark_id = observations[i].id;
     
                 RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Observation %zu is a new cone.", i);
             }
@@ -417,7 +419,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
             {
                 std::lock_guard<std::mutex> lock(optimizer_mutex_);
                 edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
-                edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id)));
+                edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(observations[i].id)));
             }
             edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
 
@@ -447,9 +449,9 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
     auto end_time = std::chrono::steady_clock::now();
     auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
     time_sum_ += duration_ms;
-    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Processing ConeArray took %.3f ms.", duration_ms);
     this->check_lap_completion();
-    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
+    // RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Processing ConeArray took %.3f ms.", duration_ms);
+    // RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
     return this->get_map(not_added_observations);
 }
 

@@ -152,6 +152,8 @@ public:
             Eigen::Vector2d z(obs_global[i].x, obs_global[i].y);
             double d2 = 0.0;
 
+            obs_global[i].id = observations[i].id;
+
             for (size_t j = 0; j < map_cones.size(); ++j) {
                 // Only match cones of the same type (color)
                 if (obs_global[i].type != map_cones[j].type) continue;
@@ -170,6 +172,14 @@ public:
             }
 
             if (best_idx != -1) {
+                if (map_cones[best_idx].id != observations[i].id){
+                    RCLCPP_ERROR(rclcpp::get_logger("association_solver"), "Wrong cone association");
+                    //Create file to store real id and calculated id
+                    std::ofstream log_file;
+                    log_file.open("slam_data_association.csv", std::ios_base::app);
+                    log_file << observations[i].id << "," << map_cones[best_idx].id << "," << min_dist << "\n";
+                    log_file.close();
+                }
                 if (best_matches.find(best_idx) == best_matches.end() || d2 < best_matches[best_idx].first) {
                     if (best_matches.find(best_idx) != best_matches.end()) {
                         associations[best_matches[best_idx].second] = -1;
