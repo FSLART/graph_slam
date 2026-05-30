@@ -374,7 +374,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
         }
 
         pair<vector<int>, std::vector<graph_slam_types::Cone>> association_result = association_solver_->associate(observations, map_cones_, robot_pose_);
-        
+
         const auto matches = association_result.first;
         const auto obs_global = association_result.second;
 

@@ -1,4 +1,5 @@
 #include "graph_slam/associationSolver.hpp"
+#include <fstream>
 namespace 
 {
     // Simple 2D Euclidean distance between two geometry_msgs points
@@ -182,6 +183,11 @@ public:
 
         auto end_time = std::chrono::steady_clock::now();
         auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+        
+        std::ofstream log_file;
+        log_file.open("data_association_time.csv", std::ios_base::app); // append mode
+        log_file << duration_ms << std::endl;
+        log_file.close();
         // RCLCPP_INFO(rclcpp::get_logger("association_solver"), "Mahalanobis association took %.3f ms.", duration_ms);
         return {associations, obs_global};
     }
