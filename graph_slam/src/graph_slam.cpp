@@ -296,7 +296,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
         return this->get_map(not_added_observations); // Skip processing if the robot is not moving
     }
     
-    auto start_time = std::chrono::steady_clock::now();
+    //auto start_time = std::chrono::steady_clock::now();
     RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received ConeArray with %zu cones.", msg->cones.size());
     this->observation_count_++;
 
@@ -438,18 +438,24 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
             this->new_edges.insert(edge); // Add new edge for update bookkeeping
         }
         if (ONLINE_FLAG){
+            auto start_time = std::chrono::steady_clock::now();
+
             update_graph(this->new_vertices, this->new_edges);
+
+            auto end_time = std::chrono::steady_clock::now();
+            auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+            RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Update took %.3f ms.", duration_ms);
         }
 
     }else {
         RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Current pose vertex not found in the graph. Probably no pose initialized.");
     }
-    auto end_time = std::chrono::steady_clock::now();
-    auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-    time_sum_ += duration_ms;
-    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Processing ConeArray took %.3f ms.", duration_ms);
+    // auto end_time = std::chrono::steady_clock::now();
+    // auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+    // time_sum_ += duration_ms;
+    //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Processing ConeArray took %.3f ms.", duration_ms);
     this->check_lap_completion();
-    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
+    //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
     return this->get_map(not_added_observations);
 }
 
@@ -649,44 +655,99 @@ void GraphSLAM::check_lap_completion()
     }
 }
 
+// void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset)
+// {
+//     //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Only %zu new edges and %zu new vertices since last update. Skipping graph update.", eset.size(), vset.size());
+//     std::lock_guard<std::mutex> lock(optimizer_mutex_);
+
+//     if(!this->initialized_once){
+//         RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Performing initial graph optimization with %zu vertices and %zu edges.",
+//                     optimizer_.vertices().size(), optimizer_.edges().size());
+
+//         this->optimizer_.initializeOptimization();
+//         this->optimizer_.optimize(10); // initial batch solve
+        
+//         this->initialized_once = true;
+//         this->new_vertices.clear();
+//         this->new_edges.clear();
+//         return;
+//     }
+
+//     if(vset.size() < 60){
+//         return; // Not enough new information to warrant an update
+//     }
+
+//     RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "New vertices: %zu, New Edges: %zu", vset.size(), eset.size());
+
+
+//     optimizer_.updateInitialization(vset, eset);
+
+//     // optimizer_.computeActiveErrors();
+//     // double chi_before = optimizer_.activeChi2();
+
+//     optimizer_.optimize(1, true); // one incremental step each time
+
+//     // optimizer_.computeActiveErrors();
+//     // double chi_after = optimizer_.activeChi2();
+
+//     //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"chi2 before %.4f after %.4f",chi_before, chi_after);
+
+//     // Clear the sets after the update
+//     this->new_vertices.clear();
+//     this->new_edges.clear();
+// }
+
 void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset)
 {
-    //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Only %zu new edges and %zu new vertices since last update. Skipping graph update.", eset.size(), vset.size());
     std::lock_guard<std::mutex> lock(optimizer_mutex_);
 
-    if(!this->initialized_once){
-        RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Performing initial graph optimization with %zu vertices and %zu edges.",
-                    optimizer_.vertices().size(), optimizer_.edges().size());
-
-        this->optimizer_.initializeOptimization();
-        this->optimizer_.optimize(10); // initial batch solve
-        
+    if (!this->initialized_once) {
+        optimizer_.initializeOptimization();
+        optimizer_.optimize(10);
         this->initialized_once = true;
         this->new_vertices.clear();
         this->new_edges.clear();
         return;
     }
 
-    if(vset.size() < 60){
-        return; // Not enough new information to warrant an update
+    if (vset.size() < 60) return;
+
+    // Build active set: only recent pose vertices + all landmarks connected to them
+    g2o::HyperGraph::VertexSet active_vertices;
+    g2o::HyperGraph::EdgeSet   active_edges;
+
+    const int WINDOW_SIZE = 20; // tune this
+    int min_pose_id = pose_id_counter_ - WINDOW_SIZE;
+
+    for (const auto& [id, v] : optimizer_.vertices()) {
+        auto* vp = dynamic_cast<VertexSE2*>(v);
+        if (vp && vp->id() >= min_pose_id) {
+            active_vertices.insert(vp);
+            for (auto* eb : vp->edges()) {
+                auto* e = dynamic_cast<g2o::OptimizableGraph::Edge*>(eb);
+                if (!e) continue;
+                active_edges.insert(e);
+                // Also pull in connected landmarks
+                for (size_t k = 0; k < e->vertices().size(); ++k) {
+                    auto* vl = dynamic_cast<VertexLandmark2D*>(e->vertices()[k]);
+                    if (vl) active_vertices.insert(vl);
+                }
+            }
+        }
     }
 
-    optimizer_.updateInitialization(vset, eset);
+    // Fix the oldest pose in the window to anchor it
+    VertexSE2* anchor = dynamic_cast<VertexSE2*>(optimizer_.vertex(min_pose_id));
+    if (anchor) anchor->setFixed(true);
 
-    optimizer_.computeActiveErrors();
-    double chi_before = optimizer_.activeChi2();
+    optimizer_.initializeOptimization(active_vertices);
+    optimizer_.optimize(2, false); // not incremental, but on small window
 
-    optimizer_.optimize(1, true); // one incremental step each time
+    // Unfix anchor after solve unless it's the very first pose
+    if (anchor && anchor->id() != 0) anchor->setFixed(false);
 
-    optimizer_.computeActiveErrors();
-    double chi_after = optimizer_.activeChi2();
-
-    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"chi2 before %.4f after %.4f",chi_before, chi_after);
-
-    // Clear the sets after the update
     this->new_vertices.clear();
     this->new_edges.clear();
-
 }
 
 visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_types::Cone> not_in_map_observations)
