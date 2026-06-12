@@ -7,8 +7,10 @@ using namespace std;
 GraphSLAM::GraphSLAM()
 {
     this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
-    // this->current_mission_.data = 6;
-    // this->mission_set_ = true;
+
+    // FOR TESTING PURPOSES ONLY
+    this->current_mission_.data = 6;
+    this->mission_set_ = true;
 
     association_solver_ = new AssociationSolver(ASSOCIATION_MODE);
 
@@ -784,6 +786,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
     
     visualization_msgs::msg::MarkerArray map_markers_;
     int id_counter = 1000;
+    if(!is_robot_moving_){
     for (const auto& cone : not_in_map_observations) {
         auto m    = make_marker(id_counter++, cone.x, cone.y);
         m.scale.x = m.scale.y = 0.2;
@@ -791,6 +794,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
         m.color.r = m.color.g = m.color.b = 0.6f;
         map_markers_.markers.push_back(std::move(m));
     }
+}
 
     for (const auto &kv : verts_map) {
         auto *v_landmark = dynamic_cast<VertexLandmark2D*>(kv.second);
