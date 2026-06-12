@@ -558,8 +558,21 @@ void GraphSLAM::compute_predicted_pose()
             EdgeSE2* odom_edge = new EdgeSE2();
             odom_edge->setVertex(0, current_pose_vertex);
             odom_edge->setVertex(1, new_pose_vertex);
-            odom_edge->setMeasurement(SE2(dx, dy, w * dt));
-            odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
+            // odom_edge->setMeasurement(SE2(dx, dy, w * dt));
+
+            // Rotate global displacement into the body frame of the source pose
+            double dx_local =  std::cos(theta) * dx + std::sin(theta) * dy;
+            double dy_local = -std::sin(theta) * dx + std::cos(theta) * dy;
+
+            odom_edge->setMeasurement(SE2(dx_local, dy_local, w * dt));
+
+            // This actually makes sense
+            Eigen::Matrix3d odom_info = Eigen::Matrix3d::Zero();
+            odom_info(0, 0) = 50.0;  // forward (most reliable)
+            odom_info(1, 1) = 5.0;   // lateral (slip possible)
+            odom_info(2, 2) = 10.0;  // heading
+            odom_edge->setInformation(odom_info);
+
             this->optimizer_.addEdge(odom_edge);
             this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
         }
@@ -712,7 +725,7 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
         return;
     }
 
-    if (vset.size() < 60) return;
+    if (vset.size() < 10) return;
 
     // Build active set: only recent pose vertices + all landmarks connected to them
     g2o::HyperGraph::VertexSet active_vertices;
