@@ -98,6 +98,8 @@ private:
     float lap_margin_ = 10.0;
     void check_lap_completion();
     
+    int correction_counter = 0;
+
     bool localization_mode_ = false;
     visualization_msgs::msg::MarkerArray final_map_;
 

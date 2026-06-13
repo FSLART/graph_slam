@@ -96,12 +96,19 @@ void GraphSLAM::build_map_kdtree()
 
 void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose)
 {
+    //return;
     if (!map_kdtree_ready_) {
         RCLCPP_WARN(
             rclcpp::get_logger("graph_slam_solver"),
             "Localization requested but KD-tree is not ready.");
         return;
     }
+
+    if(this->correction_counter < 10){
+        this->correction_counter++;
+        return;
+    }
+    this->correction_counter = 0;
 
     auto start_time = std::chrono::steady_clock::now();
 
@@ -570,7 +577,7 @@ void GraphSLAM::compute_predicted_pose()
             Eigen::Matrix3d odom_info = Eigen::Matrix3d::Zero();
             odom_info(0, 0) = 50.0;  // forward (most reliable)
             odom_info(1, 1) = 5.0;   // lateral (slip possible)
-            odom_info(2, 2) = 10.0;  // heading
+            odom_info(2, 2) = 6.0;  // heading
             odom_edge->setInformation(odom_info);
 
             this->optimizer_.addEdge(odom_edge);
@@ -661,7 +668,7 @@ void GraphSLAM::check_lap_completion()
                 // Build a KD-tree for the current map
                 this->build_map_kdtree();
 
-                RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"Localization_mode = %d",localization_mode_);
+                RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"Localization_mode = %d",this->localization_mode_);
             }
             // Build and save in cache the final vizualization map
             auto empty_observations = std::vector<graph_slam_types::Cone>{};
@@ -791,7 +798,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_t
     };
 
     static const std::unordered_map<uint8_t, std::array<float,3>> kConeColors = {
-        { lart_msgs::msg::Cone::YELLOW,       {1.0f, 1.0f, 0.0f} },
+        { lart_msgs::msg::Cone::YELLOW,       {1.0f, 0.7f, 0.0f} },
         { lart_msgs::msg::Cone::BLUE,         {0.0f, 0.0f, 1.0f} },
         { lart_msgs::msg::Cone::ORANGE_SMALL, {1.0f, 0.5f, 0.0f} },
         { lart_msgs::msg::Cone::ORANGE_BIG,   {1.0f, 0.2f, 0.0f} },
