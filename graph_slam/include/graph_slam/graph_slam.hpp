@@ -36,7 +36,7 @@
 #include <pcl/point_types.h>
 
 
-#define ASSOCIATION_MODE 1
+#define ASSOCIATION_MODE 2
 
 
 #define SKIDPAD_MAP "/maps/skidpad.yaml.default"

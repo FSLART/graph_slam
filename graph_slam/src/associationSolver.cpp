@@ -61,6 +61,7 @@ public:
                                const std::vector<graph_slam_types::Cone> &map_cones,
                                const Eigen::Vector3d &pose) override
     {
+        auto start_time = std::chrono::steady_clock::now();
 
         std::vector<graph_slam_types::Cone> obs_global = obsToGlobal(observations, pose);
         // If there is no map yet or no observations, everything is "new"
@@ -125,6 +126,18 @@ public:
             }
         }
 
+        auto end_time = std::chrono::steady_clock::now();
+        auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+        auto now = std::chrono::system_clock::now();
+        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        int num_associated = std::count_if(matches.begin(), matches.end(), [](int a) { return a != -1; });
+
+
+        std::ofstream log_file;
+        log_file.open("data_association_time_NN.csv", std::ios_base::app); // append mode
+        log_file << timestamp << "," << duration_ms << "," << num_associated << "\n";
+        log_file.close();
+
         // Return full match array, aligned with observations
         return {matches, obs_global};
     }
@@ -184,9 +197,14 @@ public:
         auto end_time = std::chrono::steady_clock::now();
         auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
         
+        int num_associated = std::count_if(associations.begin(), associations.end(), [](int a) { return a != -1; });
+
+        auto now = std::chrono::system_clock::now();
+        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
         std::ofstream log_file;
-        log_file.open("data_association_time.csv", std::ios_base::app); // append mode
-        log_file << duration_ms << std::endl;
+        log_file.open("data_association_time_mahalanobis.csv", std::ios_base::app); // append mode
+        log_file << timestamp << "," << duration_ms << "," << num_associated << "\n";
         log_file.close();
         // RCLCPP_INFO(rclcpp::get_logger("association_solver"), "Mahalanobis association took %.3f ms.", duration_ms);
         return {associations, obs_global};
@@ -202,6 +220,7 @@ public:
                                const std::vector<graph_slam_types::Cone> &map_cones,
                                const Eigen::Vector3d &pose) override
     {
+        auto start_time = std::chrono::steady_clock::now();
         std::vector<graph_slam_types::Cone> obs_global = obsToGlobal(observations, pose);
         
         if (map_cones.empty()) {
@@ -233,7 +252,7 @@ public:
 
         std::vector<int> matches(observations.size(), -1);
 
-        if (icp.hasConverged()) {
+        if (icp.hasConverged() && icp.getFitnessScore() < 7.0) {
             // 3. Match based on ALIGNED positions
             for (size_t i = 0; i < aligned_obs.size(); ++i) {
                 int best_index = -1;
@@ -250,7 +269,7 @@ public:
 
                     if (d_sq < best_dist_sq) {
                         best_dist_sq = d_sq;
-                        best_index = static_cast<int>(map_cones[j].type);
+                        best_index = static_cast<int>(map_cones[j].id);
                     }
                 }
 
@@ -260,6 +279,20 @@ public:
                 }
             }
         }
+
+        auto end_time = std::chrono::steady_clock::now();
+        auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+        auto now = std::chrono::system_clock::now();
+        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
+        int num_associated = std::count_if(matches.begin(), matches.end(), [](int a) { return a != -1; });
+
+
+        std::ofstream log_file;
+        log_file.open("data_association_time_ICP.csv", std::ios_base::app); // append mode
+        log_file << timestamp << "," << duration_ms << "," << num_associated << "\n";
+        log_file.close();
 
         return {matches, obs_global};
     }
