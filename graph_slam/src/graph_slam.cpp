@@ -455,21 +455,11 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
         }
         if (ONLINE_FLAG){
             auto start_time = std::chrono::steady_clock::now();
-
+            
             update_graph(this->new_vertices, this->new_edges);
 
             auto end_time = std::chrono::steady_clock::now();
             auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-
-            //Logging execution time for results
-            auto now = std::chrono::system_clock::now();
-            auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-
-            std::ofstream log_file;
-            log_file.open("optimization_time_sliding window_leven.csv", std::ios_base::app); // append mode
-            log_file << timestamp << "," << duration_ms << "\n";
-            log_file.close();
-
             RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Update took %.3f ms.", duration_ms);
         }
 
@@ -740,6 +730,8 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
 
     if (new_poses_since_optimize_ < WINDOW_SIZE) return;
 
+    auto start_time = std::chrono::steady_clock::now();
+
     // Build active set: only recent pose vertices + all landmarks connected to them
     g2o::HyperGraph::VertexSet active_vertices;
     g2o::HyperGraph::EdgeSet   active_edges;
@@ -776,6 +768,17 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
     this->new_vertices.clear();
     this->new_edges.clear();
     this->new_poses_since_optimize_ = 0;
+
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+    //Logging execution time for results
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
+    std::ofstream log_file;
+    log_file.open("optimization_time_sliding window_leven.csv", std::ios_base::app); // append mode
+    log_file << timestamp << "," << duration_ms << "\n";
+    log_file.close();
 }
 
 visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_types::Cone> not_in_map_observations)
