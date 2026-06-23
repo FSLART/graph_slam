@@ -38,6 +38,7 @@
 
 #define ASSOCIATION_MODE 1
 
+#define WINDOW_SIZE 30
 
 #define SKIDPAD_MAP "/maps/skidpad.yaml.default"
 
@@ -83,6 +84,7 @@ private:
     // Bookkeeping for new vertices and edges in each optimization step
     g2o::HyperGraph::VertexSet new_vertices;
     g2o::HyperGraph::EdgeSet   new_edges;
+    int new_poses_since_optimize_ = 0;
     // Stats variables
     long observation_count_ = 0;
     float time_sum_ = 0.0;
