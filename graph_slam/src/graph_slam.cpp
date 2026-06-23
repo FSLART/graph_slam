@@ -285,6 +285,9 @@ Eigen::Vector3d GraphSLAM::get_current_pose()
 
 visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_msgs::msg::ConeArray::SharedPtr msg)
 {
+    // Record start time for later logging
+    auto start_time = std::chrono::steady_clock::now();
+    
     std::vector<graph_slam_types::Cone> not_added_observations;
     if(!is_robot_moving_){
         RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Robot is stationary. Skipping ConeArray processing.");
@@ -376,6 +379,17 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
         }
 
         pair<vector<int>, std::vector<graph_slam_types::Cone>> association_result = association_solver_->associate(observations, map_cones_, robot_pose_);
+
+        // Log association results
+        auto end_time = std::chrono::steady_clock::now();
+        auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+        auto now = std::chrono::system_clock::now();
+        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
+        std::ofstream log_file;
+        log_file.open("data_association_time.csv", std::ios_base::app); // append mode
+        log_file << timestamp << "," << duration_ms << "\n";
+        log_file.close();
 
         const auto matches = association_result.first;
         const auto obs_global = association_result.second;

@@ -132,7 +132,6 @@ public:
         auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         int num_associated = std::count_if(matches.begin(), matches.end(), [](int a) { return a != -1; });
 
-
         std::ofstream log_file;
         log_file.open("data_association_time_NN.csv", std::ios_base::app); // append mode
         log_file << timestamp << "," << duration_ms << "," << num_associated << "\n";
