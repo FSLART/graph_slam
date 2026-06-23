@@ -776,7 +776,7 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
     auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
     std::ofstream log_file;
-    log_file.open("optimization_time_sliding window_leven.csv", std::ios_base::app); // append mode
+    log_file.open("optimization_time_sliding_window_leven.csv", std::ios_base::app); // append mode
     log_file << timestamp << "," << duration_ms << "\n";
     log_file.close();
 }
