@@ -337,10 +337,10 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
             auto now = std::chrono::system_clock::now();
             auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
-            std::ofstream log_file;
-            log_file.open("kd_tree_time.csv", std::ios_base::app); // append mode
-            log_file << timestamp << "," << duration_ms << "\n";
-            log_file.close();
+            // std::ofstream log_file;
+            // log_file.open("kd_tree_time.csv", std::ios_base::app); // append mode
+            // log_file << timestamp << "," << duration_ms << "\n";
+            // log_file.close();
             check_lap_completion();
             return final_map_;
         }

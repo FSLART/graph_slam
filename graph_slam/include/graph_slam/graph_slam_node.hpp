@@ -22,6 +22,7 @@ public:
     void dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg);
     void imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
     void mission_callback(const lart_msgs::msg::Mission::SharedPtr msg);
+    void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
 
 private:
 
@@ -30,6 +31,7 @@ private:
     rclcpp::Subscription<lart_msgs::msg::Dynamics>::SharedPtr dynamics_subscriber_;
     rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr imu_subscriber_;
     rclcpp::Subscription<lart_msgs::msg::Mission>::SharedPtr mission_subscriber_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_subscriber_;
     
     //Publishers
     rclcpp::Publisher<lart_msgs::msg::SlamStats>::SharedPtr slam_stats_publisher_;
