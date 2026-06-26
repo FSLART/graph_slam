@@ -329,7 +329,18 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
 
         // Use localization mode
         if (localization_mode_) {
+            auto start_time = std::chrono::steady_clock::now();
             localize_in_map(observations, robot_pose_);
+            // Log association results
+            auto end_time = std::chrono::steady_clock::now();
+            auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+            auto now = std::chrono::system_clock::now();
+            auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
+            std::ofstream log_file;
+            log_file.open("kd_tree_time.csv", std::ios_base::app); // append mode
+            log_file << timestamp << "," << duration_ms << "\n";
+            log_file.close();
             check_lap_completion();
             return final_map_;
         }
@@ -380,7 +391,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
 
         pair<vector<int>, std::vector<graph_slam_types::Cone>> association_result = association_solver_->associate(observations, map_cones_, robot_pose_);
 
-        // Log association results
+        // // Log association results
         // auto end_time = std::chrono::steady_clock::now();
         // auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
         // auto now = std::chrono::system_clock::now();

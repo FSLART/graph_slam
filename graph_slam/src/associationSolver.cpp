@@ -132,10 +132,10 @@ public:
         auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         int num_associated = std::count_if(matches.begin(), matches.end(), [](int a) { return a != -1; });
 
-        std::ofstream log_file;
-        log_file.open("data_association_time_NN.csv", std::ios_base::app); // append mode
-        log_file << timestamp << "," << duration_ms << "," << num_associated << "\n";
-        log_file.close();
+        // std::ofstream log_file;
+        // log_file.open("data_association_time_NN.csv", std::ios_base::app); // append mode
+        // log_file << timestamp << "," << duration_ms << "," << num_associated << "\n";
+        // log_file.close();
 
         // Return full match array, aligned with observations
         return {matches, obs_global};
@@ -201,10 +201,10 @@ public:
         auto now = std::chrono::system_clock::now();
         auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
-        std::ofstream log_file;
-        log_file.open("data_association_time_mahalanobis.csv", std::ios_base::app); // append mode
-        log_file << timestamp << "," << duration_ms << "," << num_associated << "\n";
-        log_file.close();
+        // std::ofstream log_file;
+        // log_file.open("data_association_time_mahalanobis.csv", std::ios_base::app); // append mode
+        // log_file << timestamp << "," << duration_ms << "," << num_associated << "\n";
+        // log_file.close();
         // RCLCPP_INFO(rclcpp::get_logger("association_solver"), "Mahalanobis association took %.3f ms.", duration_ms);
         return {associations, obs_global};
     }
@@ -288,10 +288,10 @@ public:
         int num_associated = std::count_if(matches.begin(), matches.end(), [](int a) { return a != -1; });
 
 
-        std::ofstream log_file;
-        log_file.open("data_association_time_ICP.csv", std::ios_base::app); // append mode
-        log_file << timestamp << "," << duration_ms << "," << num_associated << "\n";
-        log_file.close();
+        // std::ofstream log_file;
+        // log_file.open("data_association_time_ICP.csv", std::ios_base::app); // append mode
+        // log_file << timestamp << "," << duration_ms << "," << num_associated << "\n";
+        // log_file.close();
 
         return {matches, obs_global};
     }
