@@ -570,13 +570,7 @@ void GraphSLAM::compute_predicted_pose()
             double dy_local = -std::sin(theta) * dx + std::cos(theta) * dy;
 
             odom_edge->setMeasurement(SE2(dx_local, dy_local, w * dt));
-
-            // This actually makes sense
-            Eigen::Matrix3d odom_info = Eigen::Matrix3d::Zero();
-            odom_info(0, 0) = 50.0;  // forward (most reliable)
-            odom_info(1, 1) = 5.0;   // lateral (slip possible)
-            odom_info(2, 2) = 6.0;  // heading
-            odom_edge->setInformation(odom_info);
+            odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
 
             this->optimizer_.addEdge(odom_edge);
             this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
