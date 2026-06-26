@@ -40,6 +40,8 @@
 
 #define WINDOW_SIZE 50
 
+#define CORRECTION_LIMITER 10
+
 #define SKIDPAD_MAP "/maps/skidpad.yaml.default"
 
 #define ONLINE_FLAG true
@@ -69,27 +71,33 @@ private:
     // SLAM G2O Solvers
     using SlamBlockSolver = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
     using SlamLinearSolver = g2o::LinearSolverEigen<SlamBlockSolver::PoseMatrixType>;
+
     //Vertex Ids
     long landmark_id_counter_ = -1;
     long pose_id_counter_ = 5000;
+
     //Pose estimation
     Eigen::Vector3d current_pose_{0.0, 0.0, 0.0}; // x, y, theta
     float velocity_ = 0.0;
     float angular_velocity_ = 0.0;
     std::chrono::steady_clock::time_point last_predict_time_{};
+
     //Mutexes
     std::mutex pose_mutex_;
     std::mutex pose_id_mutex_;
     std::mutex optimizer_mutex_;
+
     // Bookkeeping for new vertices and edges in each optimization step
     g2o::HyperGraph::VertexSet new_vertices;
     g2o::HyperGraph::EdgeSet   new_edges;
     int new_poses_since_optimize_ = 0;
+
     // Stats variables
     long observation_count_ = 0;
     float time_sum_ = 0.0;
     bool is_robot_moving_= false;
     bool initialized_once = false;
+
     //Lap logic variables
     lart_msgs::msg::Mission current_mission_;
     bool mission_set_ = false;
@@ -108,16 +116,14 @@ private:
     // KD-tree variables
     pcl::PointCloud<pcl::PointXYZ>::Ptr map_cloud_{new pcl::PointCloud<pcl::PointXYZ>()};
     pcl::KdTreeFLANN<pcl::PointXYZ> map_kdtree_;
-    // std::vector<long> map_kdtree_vertex_ids_;
-    u_int8_t count_locliz_updts_ = 0;
-
     std::vector<LandmarkKDInfo> map_kdtree_landmarks_;
-
     bool map_kdtree_ready_ = false;
-
     void build_map_kdtree();
     
+    //Graph optimization
     void update_graph();
+
+    //Pose correction
     void localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose);
     visualization_msgs::msg::MarkerArray get_map(std::vector<graph_slam_types::Cone> cones = {});
 

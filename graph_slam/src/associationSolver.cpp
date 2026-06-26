@@ -106,8 +106,6 @@ public:
                 }
             }
             
-            //TODO : Use variable threshold based on observation uncertainty
-            //TODO : Threshold lower in function of the number of cones (they are probably closer)  
             if (best_index != -1 && best_dist <= ASSOCIATION_EUCLIDIAN_DISTANCE_THRESHOLD_SQUARED)
             {
                 // Observation is considered to correspond to an existing map cone
@@ -208,7 +206,7 @@ public:
             return {std::vector<int>(observations.size(), -1), obs_global};
         }
 
-        // 1. Convert ROS messages to PCL Clouds
+        //Convert ROS messages to PCL Clouds
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_obs(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_map(new pcl::PointCloud<pcl::PointXYZ>);
 
@@ -218,7 +216,7 @@ public:
         for (const auto& cone : map_cones)
             cloud_map->push_back(pcl::PointXYZ(cone.x, cone.y, 0));
 
-        // 2. Setup and Run ICP
+        //Setup and Run ICP
         pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
         icp.setInputSource(cloud_obs);
         icp.setInputTarget(cloud_map);
@@ -234,13 +232,13 @@ public:
         std::vector<int> matches(observations.size(), -1);
 
         if (icp.hasConverged()) {
-            // 3. Match based on ALIGNED positions
+            //Match based on ALIGNED positions
             for (size_t i = 0; i < aligned_obs.size(); ++i) {
                 int best_index = -1;
                 double best_dist_sq = std::numeric_limits<double>::max();
 
                 for (size_t j = 0; j < map_cones.size(); ++j) {
-                    // Still respect color classes
+                    // Respect color classes
                     if(obs_global[i].type != map_cones[j].type)
                         continue;
 
@@ -254,7 +252,6 @@ public:
                     }
                 }
 
-                // Use a tighter threshold (e.g., 0.4m) since we've already aligned clouds
                 if (best_index != -1 && best_dist_sq < 0.70) { // 0.4^2 = 0.16
                     matches[i] = best_index;
                 }

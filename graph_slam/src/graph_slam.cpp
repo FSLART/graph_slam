@@ -96,7 +96,6 @@ void GraphSLAM::build_map_kdtree()
 
 void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose)
 {
-    //return;
     if (!map_kdtree_ready_) {
         RCLCPP_WARN(
             rclcpp::get_logger("graph_slam_solver"),
@@ -104,7 +103,7 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
         return;
     }
 
-    if(this->correction_counter < 10){
+    if(this->correction_counter < CORRECTION_LIMITER){
         this->correction_counter++;
         return;
     }
@@ -234,7 +233,6 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
     local_optimizer.optimize(5);
 
     // Extract optimized pose
-
     SE2 optimized_pose = pose_vertex->estimate();
 
     Eigen::Vector3d corrected_pose;
@@ -305,7 +303,6 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
         return this->get_map(not_added_observations); // Skip processing if the robot is not moving
     }
     
-    //auto start_time = std::chrono::steady_clock::now();
     RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received ConeArray with %zu cones.", msg->cones.size());
     this->observation_count_++;
 
@@ -357,14 +354,12 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
                 continue; // Skip landmarks with no edges, as we have no information about their uncertainty
             }
             for (auto* edge_base : v_landmark->edges()) {
-                // 1. Safely check the type
+                //Check the type
                 auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);
                 if (!e_se2xy) continue;
-
-                // 2. The robot pose is usually vertex(0) in an EdgeSE2PointXY
                 int current_pose_id = e_se2xy->vertex(0)->id();
 
-                // 3. Keep the one with the highest ID (most recent in time)
+                //Keep the one with the highest ID (most recent in time)
                 if (current_pose_id > max_pose_id) {
                     max_pose_id = current_pose_id;
                     most_recent_edge = e_se2xy;
@@ -457,12 +452,8 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
     }else {
         RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Current pose vertex not found in the graph. Probably no pose initialized.");
     }
-    // auto end_time = std::chrono::steady_clock::now();
-    // auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-    // time_sum_ += duration_ms;
-    //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Processing ConeArray took %.3f ms.", duration_ms);
+    
     this->check_lap_completion();
-    //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
     return this->get_map(not_added_observations);
 }
 
@@ -563,7 +554,7 @@ void GraphSLAM::compute_predicted_pose()
             EdgeSE2* odom_edge = new EdgeSE2();
             odom_edge->setVertex(0, current_pose_vertex);
             odom_edge->setVertex(1, new_pose_vertex);
-            // odom_edge->setMeasurement(SE2(dx, dy, w * dt));
+            //odom_edge->setMeasurement(SE2(dx, dy, w * dt));
 
             // Rotate global displacement into the body frame of the source pose
             double dx_local =  std::cos(theta) * dx + std::sin(theta) * dy;
@@ -582,7 +573,7 @@ void GraphSLAM::compute_predicted_pose()
 void GraphSLAM::check_lap_completion()
 {
     if ((this->current_lap_distance_ < lap_margin_ && this->current_lap_ != -1) || !this->mission_set_) {
-        return; // you ain't got no motion
+        return;
     }
 
     float x = current_pose_[0];
@@ -639,7 +630,6 @@ void GraphSLAM::check_lap_completion()
 
                     optimizer_.removeVertex(vl);
                 }
-                // this->initialized_once = false; 
                 this->new_poses_since_optimize_ = 0;
                 this->optimizer_.initializeOptimization();
                 this->optimizer_.optimize(1, false);
