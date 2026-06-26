@@ -42,10 +42,6 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
         MISSION_TOPIC, 10,
         bind(&GraphSLAM_Node::mission_callback, this, _1), other_options);
 
-    pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-        "/pacsim/pose", 10,
-        bind(&GraphSLAM_Node::pose_callback, this, _1), other_options);
-
     slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>(STATS_TOPIC, 10);
     
     map_markers_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(MAP_MARKERS_TOPIC, 10);
@@ -122,13 +118,6 @@ void GraphSLAM_Node::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr
 void GraphSLAM_Node::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg){
     RCLCPP_DEBUG(this->get_logger(), "Received IMU angular velocity message");
     this->graph_slam_solver_->set_angular_velocity(msg);
-
-    // // Reduce the frequency of pose prediction
-    // if(this->dynamics_counter < 3){
-    //     this->dynamics_counter++;
-    //     return;
-    // }
-    // this->dynamics_counter = 0;
 }
 
 void GraphSLAM_Node::mission_callback(const lart_msgs::msg::Mission::SharedPtr msg){
@@ -158,35 +147,6 @@ lart_msgs::msg::ConeArray GraphSLAM_Node::create_map_cones(visualization_msgs::m
         map_cones_msg.cones.push_back(cone);
     }
     return map_cones_msg;
-}
-
-void GraphSLAM_Node::pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg){
-    RCLCPP_DEBUG(this->get_logger(), "Received pose message");
-    Eigen::Vector3d sim_pose;
-    sim_pose[0] = msg->pose.position.x;
-    sim_pose[1] = msg->pose.position.y;
-    tf2::Quaternion q(
-        msg->pose.orientation.x,
-        msg->pose.orientation.y,
-        msg->pose.orientation.z,
-        msg->pose.orientation.w
-    );
-    double roll, pitch, yaw;
-    tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
-    sim_pose[2] = yaw;
-
-    Eigen::Vector3d slam_pose;
-    slam_pose = this->graph_slam_solver_->get_current_pose();
-
-    int lap_count = this->graph_slam_solver_->get_lap();
-
-    auto now = std::chrono::system_clock::now();
-    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-
-    std::ofstream log_file;
-    log_file.open("pose_over_2laps.csv", std::ios_base::app); // append mode
-    log_file << timestamp << "," << sim_pose[0] << "," << sim_pose[1] << "," << sim_pose[2] << "," << slam_pose[0] << "," << slam_pose[1] << "," << slam_pose[2] << "," << lap_count << "\n";
-    log_file.close();
 }
 
 int main(int argc, char *argv[])
