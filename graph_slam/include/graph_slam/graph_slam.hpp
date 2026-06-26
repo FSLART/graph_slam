@@ -38,7 +38,7 @@
 
 #define ASSOCIATION_MODE 1
 
-#define WINDOW_SIZE 20
+#define WINDOW_SIZE 50
 
 #define SKIDPAD_MAP "/maps/skidpad.yaml.default"
 
