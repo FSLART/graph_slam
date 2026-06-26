@@ -41,8 +41,6 @@ private:
     void broadcast_transform();
     lart_msgs::msg::ConeArray create_map_cones(visualization_msgs::msg::MarkerArray cones);
 
-    //frame counters
-    uint8_t dynamics_counter = 0;
 protected:
     GraphSLAM *graph_slam_solver_;
 };

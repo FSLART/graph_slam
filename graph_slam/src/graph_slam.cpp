@@ -285,8 +285,6 @@ Eigen::Vector3d GraphSLAM::get_current_pose()
 
 visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_msgs::msg::ConeArray::SharedPtr msg)
 {
-    // Record start time for later logging
-    // auto start_time = std::chrono::steady_clock::now();
     
     std::vector<graph_slam_types::Cone> not_added_observations;
     if(!is_robot_moving_){
@@ -329,18 +327,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
 
         // Use localization mode
         if (localization_mode_) {
-            auto start_time = std::chrono::steady_clock::now();
             localize_in_map(observations, robot_pose_);
-            // Log association results
-            auto end_time = std::chrono::steady_clock::now();
-            auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-            auto now = std::chrono::system_clock::now();
-            auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-
-            // std::ofstream log_file;
-            // log_file.open("kd_tree_time.csv", std::ios_base::app); // append mode
-            // log_file << timestamp << "," << duration_ms << "\n";
-            // log_file.close();
             check_lap_completion();
             return final_map_;
         }
@@ -364,14 +351,12 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
                 continue; // Skip landmarks with no edges, as we have no information about their uncertainty
             }
             for (auto* edge_base : v_landmark->edges()) {
-                // 1. Safely check the type
+                // Check the type
                 auto* e_se2xy = dynamic_cast<g2o::EdgeSE2PointXY*>(edge_base);
                 if (!e_se2xy) continue;
-
-                // 2. The robot pose is usually vertex(0) in an EdgeSE2PointXY
                 int current_pose_id = e_se2xy->vertex(0)->id();
 
-                // 3. Keep the one with the highest ID (most recent in time)
+                //Keep the one with the highest ID (most recent in time)
                 if (current_pose_id > max_pose_id) {
                     max_pose_id = current_pose_id;
                     most_recent_edge = e_se2xy;
@@ -391,20 +376,8 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
 
         pair<vector<int>, std::vector<graph_slam_types::Cone>> association_result = association_solver_->associate(observations, map_cones_, robot_pose_);
 
-        // // Log association results
-        // auto end_time = std::chrono::steady_clock::now();
-        // auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-        // auto now = std::chrono::system_clock::now();
-        // auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-
-        // std::ofstream log_file;
-        // log_file.open("data_association_time.csv", std::ios_base::app); // append mode
-        // log_file << timestamp << "," << duration_ms << "\n";
-        // log_file.close();
-
         const auto matches = association_result.first;
         const auto obs_global = association_result.second;
-
     
         for (size_t i = 0; i < observations.size(); ++i){
             long landmark_id = -1;
@@ -432,7 +405,6 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
                     std::lock_guard<std::mutex> lock(optimizer_mutex_);
                     this->optimizer_.addVertex(landmark);
                 }
-                this->new_vertices.insert(landmark); // Add new landmark vertex for update bookeeping
     
                 landmark_id = landmark_id_counter_;
     
@@ -448,7 +420,6 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
             }
             edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
 
-            // RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "information matrix [[%.4f, 0], [0, %.4f]]", information(0, 0), information(1, 1));
             observations[i].calculate_information(robot_pose_[2]);
             edge->setInformation(observations[i].information); // Use the computed information matrix
 
@@ -462,12 +433,11 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
                 this->optimizer_.addEdge(edge);
             }
 
-            this->new_edges.insert(edge); // Add new edge for update bookkeeping
         }
         if (ONLINE_FLAG){
             auto start_time = std::chrono::steady_clock::now();
             
-            update_graph(this->new_vertices, this->new_edges);
+            update_graph();
 
             auto end_time = std::chrono::steady_clock::now();
             auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
@@ -477,12 +447,8 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
     }else {
         RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"), "Current pose vertex not found in the graph. Probably no pose initialized.");
     }
-    // auto end_time = std::chrono::steady_clock::now();
-    // auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-    // time_sum_ += duration_ms;
-    //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Processing ConeArray took %.3f ms.", duration_ms);
+
     this->check_lap_completion();
-    //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Current pose: (%.2f, %.2f, %.2f), Lap: %d", current_pose_[0], current_pose_[1], current_pose_[2], current_lap_);
     return this->get_map(not_added_observations);
 }
 
@@ -578,7 +544,6 @@ void GraphSLAM::compute_predicted_pose()
             new_pose_vertex->setId(++pose_id_counter_);
             new_pose_vertex->setEstimate(SE2(current_pose_[0], current_pose_[1], current_pose_[2]));
             optimizer_.addVertex(new_pose_vertex);
-            this->new_vertices.insert(new_pose_vertex); // Add new pose vertex for update bookkeeping
             ++this->new_poses_since_optimize_;
             
             EdgeSE2* odom_edge = new EdgeSE2();
@@ -586,15 +551,8 @@ void GraphSLAM::compute_predicted_pose()
             odom_edge->setVertex(1, new_pose_vertex);
             odom_edge->setMeasurement(SE2(dx, dy, w * dt));
 
-            // This actually makes sense
-            // Eigen::Matrix3d odom_info = Eigen::Matrix3d::Zero();
-            // odom_info(0, 0) = 50.0;  // forward (most reliable)
-            // odom_info(1, 1) = 5.0;   // lateral (slip possible)
-            // odom_info(2, 2) = 6.0;  // heading
-            // odom_edge->setInformation(odom_info);
             odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
             this->optimizer_.addEdge(odom_edge);
-            this->new_edges.insert(odom_edge); // Add new edge for update bookkeeping
         }
     }
 
@@ -603,7 +561,7 @@ void GraphSLAM::compute_predicted_pose()
 void GraphSLAM::check_lap_completion()
 {
     if ((this->current_lap_distance_ < lap_margin_ && this->current_lap_ != -1) || !this->mission_set_) {
-        return; // you ain't got no motion
+        return;
     }
 
     float x = current_pose_[0];
@@ -611,7 +569,7 @@ void GraphSLAM::check_lap_completion()
 
     bool lap_completed = false;
 
-    // Check if we are close to the starting line (e.g., within 1 meter)
+    // Check if we are close to the starting line
     switch (current_mission_.data){
         case lart_msgs::msg::Mission::ACCELERATION:
             if (abs(x-75.0) < lap_margin_x_) {
@@ -660,9 +618,7 @@ void GraphSLAM::check_lap_completion()
 
                     optimizer_.removeVertex(vl);
                 }
-                // this->initialized_once = false; //FIXME : THIS DOES NOT SOLVE THE PROBLEM
-                this->new_vertices.clear();
-                this->new_edges.clear();
+
                 this->optimizer_.initializeOptimization();
                 this->optimizer_.optimize(1, false);
                 this->optimizer_.save("final_graph.g2o");
@@ -690,49 +646,8 @@ void GraphSLAM::check_lap_completion()
     }
 }
 
-// void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset)
-// {
-//     //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Only %zu new edges and %zu new vertices since last update. Skipping graph update.", eset.size(), vset.size());
-//     std::lock_guard<std::mutex> lock(optimizer_mutex_);
 
-//     if(!this->initialized_once){
-//         RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Performing initial graph optimization with %zu vertices and %zu edges.",
-//                     optimizer_.vertices().size(), optimizer_.edges().size());
-
-//         this->optimizer_.initializeOptimization();
-//         this->optimizer_.optimize(10); // initial batch solve
-        
-//         this->initialized_once = true;
-//         this->new_vertices.clear();
-//         this->new_edges.clear();
-//         return;
-//     }
-
-//     if(vset.size() < 60){
-//         return; // Not enough new information to warrant an update
-//     }
-
-//     RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "New vertices: %zu, New Edges: %zu", vset.size(), eset.size());
-
-
-//     optimizer_.updateInitialization(vset, eset);
-
-//     // optimizer_.computeActiveErrors();
-//     // double chi_before = optimizer_.activeChi2();
-
-//     optimizer_.optimize(1, true); // one incremental step each time
-
-//     // optimizer_.computeActiveErrors();
-//     // double chi_after = optimizer_.activeChi2();
-
-//     //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"chi2 before %.4f after %.4f",chi_before, chi_after);
-
-//     // Clear the sets after the update
-//     this->new_vertices.clear();
-//     this->new_edges.clear();
-// }
-
-void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset)
+void GraphSLAM::update_graph()
 {
     std::lock_guard<std::mutex> lock(optimizer_mutex_);
 
@@ -740,15 +655,11 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
         optimizer_.initializeOptimization();
         optimizer_.optimize(10);
         this->initialized_once = true;
-        this->new_vertices.clear();
-        this->new_edges.clear();
         this->new_poses_since_optimize_ = 0;
         return;
     }
 
     if (new_poses_since_optimize_ < WINDOW_SIZE) return;
-
-    auto start_time = std::chrono::steady_clock::now();
 
     // Build active set: only recent pose vertices + all landmarks connected to them
     g2o::HyperGraph::VertexSet active_vertices;
@@ -783,20 +694,8 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
     // Unfix anchor after solve unless it's the very first pose
     if (anchor && anchor->id() != 0) anchor->setFixed(false);
 
-    this->new_vertices.clear();
-    this->new_edges.clear();
     this->new_poses_since_optimize_ = 0;
 
-    auto end_time = std::chrono::steady_clock::now();
-    auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-    //Logging execution time for results
-    auto now = std::chrono::system_clock::now();
-    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-
-    std::ofstream log_file;
-    log_file.open("optimization_time_sliding_window_leven.csv", std::ios_base::app); // append mode
-    log_file << timestamp << "," << duration_ms << "\n";
-    log_file.close();
 }
 
 visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_types::Cone> not_in_map_observations)
