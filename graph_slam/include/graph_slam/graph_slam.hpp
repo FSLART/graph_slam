@@ -38,6 +38,7 @@
 
 #define ASSOCIATION_MODE 1
 
+#define WINDOW_SIZE 20
 
 #define SKIDPAD_MAP "/maps/skidpad.yaml.default"
 
@@ -83,6 +84,7 @@ private:
     // Bookkeeping for new vertices and edges in each optimization step
     g2o::HyperGraph::VertexSet new_vertices;
     g2o::HyperGraph::EdgeSet   new_edges;
+    int new_poses_since_optimize_ = 0;
     // Stats variables
     long observation_count_ = 0;
     float time_sum_ = 0.0;
@@ -115,7 +117,7 @@ private:
 
     void build_map_kdtree();
     
-    void update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset);
+    void update_graph();
     void localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose);
     visualization_msgs::msg::MarkerArray get_map(std::vector<graph_slam_types::Cone> cones = {});
 

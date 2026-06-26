@@ -414,7 +414,6 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
                     std::lock_guard<std::mutex> lock(optimizer_mutex_);
                     this->optimizer_.addVertex(landmark);
                 }
-                this->new_vertices.insert(landmark); // Add new landmark vertex for update bookeeping
     
                 landmark_id = landmark_id_counter_;
     
@@ -444,12 +443,11 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
                 this->optimizer_.addEdge(edge);
             }
 
-            this->new_edges.insert(edge); // Add new edge for update bookkeeping
         }
         if (ONLINE_FLAG){
             auto start_time = std::chrono::steady_clock::now();
 
-            update_graph(this->new_vertices, this->new_edges);
+            update_graph();
 
             auto end_time = std::chrono::steady_clock::now();
             auto duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
@@ -560,7 +558,7 @@ void GraphSLAM::compute_predicted_pose()
             new_pose_vertex->setId(++pose_id_counter_);
             new_pose_vertex->setEstimate(SE2(current_pose_[0], current_pose_[1], current_pose_[2]));
             optimizer_.addVertex(new_pose_vertex);
-            this->new_vertices.insert(new_pose_vertex); // Add new pose vertex for update bookkeeping
+            ++this->new_poses_since_optimize_;
             
             EdgeSE2* odom_edge = new EdgeSE2();
             odom_edge->setVertex(0, current_pose_vertex);
@@ -647,9 +645,8 @@ void GraphSLAM::check_lap_completion()
 
                     optimizer_.removeVertex(vl);
                 }
-                // this->initialized_once = false; //FIXME : THIS DOES NOT SOLVE THE PROBLEM
-                this->new_vertices.clear();
-                this->new_edges.clear();
+                // this->initialized_once = false; 
+                this->new_poses_since_optimize_ = 0;
                 this->optimizer_.initializeOptimization();
                 this->optimizer_.optimize(1, false);
                 this->optimizer_.save("final_graph.g2o");
@@ -677,49 +674,7 @@ void GraphSLAM::check_lap_completion()
     }
 }
 
-// void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset)
-// {
-//     //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Only %zu new edges and %zu new vertices since last update. Skipping graph update.", eset.size(), vset.size());
-//     std::lock_guard<std::mutex> lock(optimizer_mutex_);
-
-//     if(!this->initialized_once){
-//         RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "Performing initial graph optimization with %zu vertices and %zu edges.",
-//                     optimizer_.vertices().size(), optimizer_.edges().size());
-
-//         this->optimizer_.initializeOptimization();
-//         this->optimizer_.optimize(10); // initial batch solve
-        
-//         this->initialized_once = true;
-//         this->new_vertices.clear();
-//         this->new_edges.clear();
-//         return;
-//     }
-
-//     if(vset.size() < 60){
-//         return; // Not enough new information to warrant an update
-//     }
-
-//     RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"), "New vertices: %zu, New Edges: %zu", vset.size(), eset.size());
-
-
-//     optimizer_.updateInitialization(vset, eset);
-
-//     // optimizer_.computeActiveErrors();
-//     // double chi_before = optimizer_.activeChi2();
-
-//     optimizer_.optimize(1, true); // one incremental step each time
-
-//     // optimizer_.computeActiveErrors();
-//     // double chi_after = optimizer_.activeChi2();
-
-//     //RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),"chi2 before %.4f after %.4f",chi_before, chi_after);
-
-//     // Clear the sets after the update
-//     this->new_vertices.clear();
-//     this->new_edges.clear();
-// }
-
-void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::EdgeSet& eset)
+void GraphSLAM::update_graph()
 {
     std::lock_guard<std::mutex> lock(optimizer_mutex_);
 
@@ -727,18 +682,16 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
         optimizer_.initializeOptimization();
         optimizer_.optimize(10);
         this->initialized_once = true;
-        this->new_vertices.clear();
-        this->new_edges.clear();
+        this->new_poses_since_optimize_ = 0;
         return;
     }
 
-    if (vset.size() < 10) return;
+    if (this->new_poses_since_optimize_ < WINDOW_SIZE) return;
 
     // Build active set: only recent pose vertices + all landmarks connected to them
     g2o::HyperGraph::VertexSet active_vertices;
     g2o::HyperGraph::EdgeSet   active_edges;
 
-    const int WINDOW_SIZE = 20; // tune this
     int min_pose_id = pose_id_counter_ - WINDOW_SIZE;
 
     for (const auto& [id, v] : optimizer_.vertices()) {
@@ -768,8 +721,7 @@ void GraphSLAM::update_graph(g2o::HyperGraph::VertexSet& vset, g2o::HyperGraph::
     // Unfix anchor after solve unless it's the very first pose
     if (anchor && anchor->id() != 0) anchor->setFixed(false);
 
-    this->new_vertices.clear();
-    this->new_edges.clear();
+    this->new_poses_since_optimize_ = 0;
 }
 
 visualization_msgs::msg::MarkerArray GraphSLAM::get_map(std::vector<graph_slam_types::Cone> not_in_map_observations)
