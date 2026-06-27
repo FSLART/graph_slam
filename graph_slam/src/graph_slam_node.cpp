@@ -25,30 +25,30 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
 
     // Subscribe to the cone observations topic
     observations_subscriber_ = this->create_subscription<lart_msgs::msg::ConeArray>(
-        CONES_TOPIC, 10,
+        TOPIC_CONES, 10,
         bind(&GraphSLAM_Node::observations_callback, this, _1), obs_options);
 
     // Subscribe to the dynamics topic
     dynamics_subscriber_ = this->create_subscription<lart_msgs::msg::Dynamics>(
-        DYNAMICS_TOPIC, 10,
+        TOPIC_CONTROL_FEEDBACK, 10,
         bind(&GraphSLAM_Node::dynamics_callback, this, _1), other_options);
 
     //Subscribe to angular velocity topic 
     imu_subscriber_ = this->create_subscription<geometry_msgs::msg::Vector3Stamped>(
-        IMU_TOPIC, 10,
+        TOPIC_IMU_ANGULAR_VELOCITY, 10,
         bind(&GraphSLAM_Node::imu_callback, this, _1), other_options);
 
     mission_subscriber_ = this->create_subscription<lart_msgs::msg::Mission>(
-        MISSION_TOPIC, 10,
+        TOPIC_MISSION_PC, 10,
         bind(&GraphSLAM_Node::mission_callback, this, _1), other_options);
 
-    slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>(STATS_TOPIC, 10);
+    slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>(TOPIC_STATS, 10);
     
-    map_markers_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(MAP_MARKERS_TOPIC, 10);
+    map_markers_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(TOPIC_MAP_MARKERS, 10);
 
-    map_publisher_ = this->create_publisher<lart_msgs::msg::ConeArray>(MAP_TOPIC, 10);
+    map_publisher_ = this->create_publisher<lart_msgs::msg::ConeArray>(TOPIC_MAP, 10);
 
-    pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(POSE_TOPIC, 10);
+    pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(TOPIC_SLAM_POSE, 10);
 
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 

@@ -3,15 +3,7 @@
 
 #include "graph_slam/graph_slam.hpp"
 
-#define CONES_TOPIC "/mapping/cones" // observations
-#define DYNAMICS_TOPIC "/acu_origin/dynamics" //rpm
-#define IMU_TOPIC "/imu/angular_velocity"
-#define MISSION_TOPIC "/pc_origin/system_status/critical_as/mission"
-#define MAP_MARKERS_TOPIC "/slam/map/markers"
-#define MAP_TOPIC "/slam/map"
-#define POSE_TOPIC "/slam/pose"
-#define POSE_MARKER_TOPIC "/slam/pose_marker"
-#define STATS_TOPIC "/slam/stats"
+#include "topics.h"
 
 class GraphSLAM_Node : public rclcpp::Node
 {
