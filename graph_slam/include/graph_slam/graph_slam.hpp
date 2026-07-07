@@ -61,7 +61,7 @@ public:
     void process_dynamics(const lart_msgs::msg::Dynamics::SharedPtr msg);
     void set_angular_velocity(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
     void set_mission(const lart_msgs::msg::Mission::SharedPtr msg);
-    void compute_predicted_pose();
+    void compute_predicted_pose(double stamp_sec);
     Eigen::Vector3d get_current_pose();
     g2o::SparseOptimizer optimizer_;
     int get_lap(){return current_lap_;};
@@ -78,7 +78,7 @@ private:
     Eigen::Vector3d current_pose_{0.0, 0.0, 0.0}; // x, y, theta
     float velocity_ = 0.0;
     float angular_velocity_ = 0.0;
-    std::chrono::steady_clock::time_point last_predict_time_{};
+    double last_predict_stamp_sec_ = -1.0; // Step 0: last dynamics header stamp [s]; <0 = uninitialized
 
     //Mutexes
     std::mutex pose_mutex_;

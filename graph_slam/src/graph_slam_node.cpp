@@ -112,7 +112,8 @@ void GraphSLAM_Node::observations_callback(const lart_msgs::msg::ConeArray::Shar
 void GraphSLAM_Node::dynamics_callback(const lart_msgs::msg::Dynamics::SharedPtr msg){
     RCLCPP_DEBUG(this->get_logger(), "Received dynamics message");
     this->graph_slam_solver_->process_dynamics(msg);
-    this->graph_slam_solver_->compute_predicted_pose();
+    // Step 0: pass the message stamp so dt comes from the data, not the wall clock.
+    this->graph_slam_solver_->compute_predicted_pose(rclcpp::Time(msg->header.stamp).seconds());
 }
 
 void GraphSLAM_Node::imu_callback(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg){

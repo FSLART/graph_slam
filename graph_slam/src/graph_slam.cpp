@@ -495,7 +495,7 @@ void GraphSLAM::set_mission(const lart_msgs::msg::Mission::SharedPtr msg)
 }
 
 
-void GraphSLAM::compute_predicted_pose()
+void GraphSLAM::compute_predicted_pose(double stamp_sec)
 {
     if (this->velocity_ == 0.0 && !this->is_robot_moving_){
         return;
@@ -503,14 +503,21 @@ void GraphSLAM::compute_predicted_pose()
 
     is_robot_moving_ = true;
 
-    auto now = chrono::steady_clock::now();
-    if (last_predict_time_.time_since_epoch().count() == 0) {
-        last_predict_time_ = now;
+    // Step 0: derive dt from the message header stamp (passed in), not the wall clock, so
+    // offline bag replay is deterministic and independent of playback rate / CPU scheduling.
+    if (last_predict_stamp_sec_ < 0.0) {
+        last_predict_stamp_sec_ = stamp_sec;
         return;
     }
 
-    double dt = chrono::duration<double>(now - last_predict_time_).count();
-    last_predict_time_ = now;
+    double dt = stamp_sec - last_predict_stamp_sec_;
+    last_predict_stamp_sec_ = stamp_sec;
+
+    // Sanity clamp: skip non-positive (duplicate / out-of-order stamps) or absurdly large
+    // steps (bag seeks / stalls) rather than integrating garbage.
+    if (dt <= 0.0 || dt > 0.5) {
+        return;
+    }
 
     double v = static_cast<double>(this->velocity_);
     double w = static_cast<double>(this->angular_velocity_);
