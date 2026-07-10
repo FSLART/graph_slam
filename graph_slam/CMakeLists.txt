@@ -19,6 +19,9 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+# dev-only: offline synchronous SLAM harness (deterministic A/B replay)
+find_package(rosbag2_cpp REQUIRED)
+find_package(rosgraph_msgs REQUIRED)
 
 add_executable(graph_slam_node
   src/graph_slam_node.cpp
@@ -64,6 +67,47 @@ target_link_libraries(graph_slam_node
 
 install(TARGETS
   graph_slam_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# ---- dev-only: offline synchronous SLAM harness (Option C / deterministic A/B) ----
+# Reuses the SLAM core sources so it links the exact same GraphSLAM as the node.
+add_executable(graph_slam_offline
+  src/offline_slam_harness.cpp
+  src/graph_slam.cpp
+  src/associationSolver.cpp
+  src/types_graph_slam.cpp
+  src/map_manager.cpp
+)
+target_include_directories(graph_slam_offline PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${YAML_CPP_INCLUDE_DIRS}
+)
+ament_target_dependencies(graph_slam_offline
+  rclcpp
+  lart_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  visualization_msgs
+  yaml-cpp
+  rosbag2_cpp
+  rosgraph_msgs
+)
+target_link_libraries(graph_slam_offline
+  fmt::fmt
+  g2o_core
+  g2o_types_slam2d
+  g2o_solver_eigen
+  g2o_stuff
+  ${PCL_LIBRARIES}
+  ${YAML_CPP_LIBRARIES}
+  ament_index_cpp::ament_index_cpp
+)
+install(TARGETS
+  graph_slam_offline
   DESTINATION lib/${PROJECT_NAME}
 )
 
