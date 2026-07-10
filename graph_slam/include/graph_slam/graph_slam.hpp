@@ -23,6 +23,7 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <g2o/core/sparse_optimizer.h>
+#include <g2o/core/sparse_block_matrix.h>
 #include <g2o/core/optimization_algorithm_levenberg.h>
 #include <g2o/core/block_solver.h>
 #include <g2o/core/sparse_optimizer_terminate_action.h>
@@ -89,6 +90,10 @@ private:
     double odom_slip_inflation_    = 1.0;     // x sigma_ds when slip detected (detection: TODO Step 1b)
     double odom_sigma_ds_floor_    = 1e-3;    // min per-step translation sigma [m] (avoids inf info at v~0)
     double odom_sigma_theta_floor_ = 1e-5;    // min per-step heading sigma [rad]
+
+    // Step 2: pose covariance Sigma (x,y,theta). Grown in compute_predicted_pose (F*S*F'+Q),
+    // reset/updated at map corrections (computeMarginals + Kalman). Initialized in the ctor.
+    Eigen::Matrix3d pose_cov_;
 
     //Mutexes
     std::mutex pose_mutex_;

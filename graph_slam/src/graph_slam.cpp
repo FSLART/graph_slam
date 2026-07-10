@@ -36,7 +36,12 @@ GraphSLAM::GraphSLAM()
     initial_pose->setFixed(true); // Fix the initial pose to anchor the graph
     initial_pose->setEstimate(SE2(0, 0, 0));
     this->current_pose_ = Eigen::Vector3d(0, 0, 0);
-    
+    // Step 2: initial pose covariance -- small but non-zero (0.1 m, 0.1 m, 0.05 rad)^2.
+    this->pose_cov_ = Eigen::Matrix3d::Zero();
+    this->pose_cov_(0, 0) = 0.01;
+    this->pose_cov_(1, 1) = 0.01;
+    this->pose_cov_(2, 2) = 0.0025;
+
     optimizer_.addVertex(initial_pose);
     
     // Enable verbose output for debugging
@@ -237,31 +242,48 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
     corrected_pose[1] = optimized_pose.translation()[1];
     corrected_pose[2] =optimized_pose.rotation().angle();
 
-    // Safety gating to prevent large jumps in localization
-    double dx = corrected_pose[0] - robot_pose[0];
-    double dy = corrected_pose[1] - robot_pose[1];
-    double dtheta = corrected_pose[2] - robot_pose[2];
-
-    dtheta = atan2(sin(dtheta), cos(dtheta));
-
-    double translation_norm = std::sqrt(dx * dx + dy * dy);
-
-    if (translation_norm > 1.5 || std::abs(dtheta) > 0.5){
-        RCLCPP_WARN(
-            rclcpp::get_logger("graph_slam_solver"),
-            "Rejecting localization correction "
-            "(dx=%.2f dy=%.2f dtheta=%.2f)",
-            dx,
-            dy,
-            dtheta);
-
-        return;
+    // Step 2: recover the correction covariance from the local solve. Only the pose vertex is
+    // free (landmarks are fixed), so this marginal IS the 3x3 pose covariance. Fallback if it fails.
+    Eigen::Matrix3d Sigma_meas = Eigen::Matrix3d::Identity() * 1e-2;
+    {
+        g2o::SparseBlockMatrix<Eigen::MatrixXd> spinv;
+        if (local_optimizer.computeMarginals(spinv, pose_vertex)) {
+            auto* block = spinv.block(pose_vertex->hessianIndex(), pose_vertex->hessianIndex());
+            if (block) Sigma_meas = *block;
+        }
     }
 
-    // Commit pose
+    // Step 3: gate + fuse the correction by covariance, not raw distance.
+    // Innovation = corrected - predicted(robot_pose), theta wrapped.
+    Eigen::Vector3d delta;
+    delta[0] = corrected_pose[0] - robot_pose[0];
+    delta[1] = corrected_pose[1] - robot_pose[1];
+    delta[2] = atan2(sin(corrected_pose[2] - robot_pose[2]), cos(corrected_pose[2] - robot_pose[2]));
+
+    const Eigen::Matrix3d Sigma_pred = pose_cov_;      // grown since the last correction
+    const Eigen::Matrix3d S = Sigma_pred + Sigma_meas; // innovation covariance
+    const Eigen::Matrix3d S_inv = S.inverse();
+
+    // Mahalanobis chi-square consistency gate (3 DoF, 95% -> 7.815). A large correction that is
+    // consistent with large accumulated uncertainty is accepted; a large one while confident is a
+    // likely bad association and rejected -- the decision depends on uncertainty, not raw size.
+    const double d2 = delta.transpose() * S_inv * delta;
+    if (!std::isfinite(d2) || d2 > 7.815) {
+        RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"),
+                    "Rejecting inconsistent correction (d2=%.2f > 7.815; |dxy|=%.2f dth=%.2f)",
+                    d2, std::sqrt(delta[0]*delta[0] + delta[1]*delta[1]), delta[2]);
+        return;  // Sigma keeps growing (no info gained) -> a genuine later correction can be accepted
+    }
+
+    // Soft (Kalman) update: blend by relative confidence instead of teleporting -> continuous
+    // output, no jerk, and even a partial nudge always moves the right way.
+    const Eigen::Matrix3d K = Sigma_pred * S_inv;
+    Eigen::Vector3d updated = robot_pose + K * delta;
+    updated[2] = atan2(sin(updated[2]), cos(updated[2]));
     {
         std::lock_guard<std::mutex> lock(pose_mutex_);
-        current_pose_ = corrected_pose;
+        current_pose_ = updated;
+        pose_cov_ = (Eigen::Matrix3d::Identity() - K) * Sigma_pred;
     }
 
     auto end_time = std::chrono::steady_clock::now();
@@ -555,6 +577,29 @@ void GraphSLAM::compute_predicted_pose(double stamp_sec)
     // Normalize angle to [-pi, pi]
     current_pose_[2] = atan2(sin(current_pose_[2]), cos(current_pose_[2]));
 
+    // Step 1/2: per-step odometry noise -- shared by the odom-edge information (mapping mode)
+    // and the covariance process noise Q (both modes). sigma_ds: wheel-speed/rolling-radius
+    // scale; sigma_dth: gyro noise density. Floors keep them finite at v~0 / dt~0.
+    double sigma_ds  = fmax(odom_sigma_v_frac_ * fabs(v) * dt * odom_slip_inflation_,
+                            odom_sigma_ds_floor_);
+    double sigma_dth = fmax(odom_sigma_theta_coeff_ * sqrt(dt), odom_sigma_theta_floor_);
+
+    // Step 2: propagate pose covariance through the motion model (EKF predict). F is the motion
+    // Jacobian d(x,y,theta)_new/d(x,y,theta)_old for the unicycle increment; Q is the per-DoF
+    // odom process noise. Sigma grows here between corrections and is reset at corrections.
+    {
+        std::lock_guard<std::mutex> lock(pose_mutex_);
+        Eigen::Matrix3d F;
+        F << 1.0, 0.0, -dy,
+             0.0, 1.0,  dx,
+             0.0, 0.0,  1.0;
+        Eigen::Matrix3d Q = Eigen::Matrix3d::Zero();
+        Q(0, 0) = sigma_ds * sigma_ds;
+        Q(1, 1) = sigma_ds * sigma_ds;
+        Q(2, 2) = sigma_dth * sigma_dth;
+        pose_cov_ = F * pose_cov_ * F.transpose() + Q;
+    }
+
     if(!localization_mode_){
         // Update the current pose vertex in the graph
         {
@@ -572,14 +617,9 @@ void GraphSLAM::compute_predicted_pose(double stamp_sec)
             odom_edge->setVertex(1, new_pose_vertex);
             odom_edge->setMeasurement(SE2(dx, dy, w * dt));
 
-            // Step 1: real per-DoF information (was Identity()*35 -- one magic number claiming
-            // equal confidence in metres and radians, constant regardless of step/turn). sigma_ds
-            // from wheel-speed/rolling-radius scale; sigma_dtheta from the gyro noise density.
-            // Isotropic in x,y (simple start; anisotropic cos/sin split deferred). Floors keep the
-            // information finite at v~0 / dt~0. Mirrors the observation-edge sigma idiom (~L200).
-            double sigma_ds  = fmax(odom_sigma_v_frac_ * fabs(v) * dt * odom_slip_inflation_,
-                                    odom_sigma_ds_floor_);
-            double sigma_dth = fmax(odom_sigma_theta_coeff_ * sqrt(dt), odom_sigma_theta_floor_);
+            // Step 1: real per-DoF information Omega = Sigma^-1 (was Identity()*35 -- one magic
+            // number claiming equal confidence in metres and radians). sigma_ds / sigma_dth are
+            // computed above (shared with the Step 2 covariance Q). Isotropic in x,y.
             Eigen::Matrix3d odom_information = Eigen::Matrix3d::Zero();
             odom_information(0, 0) = 1.0 / (sigma_ds * sigma_ds);
             odom_information(1, 1) = 1.0 / (sigma_ds * sigma_ds);
