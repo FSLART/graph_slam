@@ -14,6 +14,12 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
 
     graph_slam_solver_ = new GraphSLAM();
 
+    // Step 1: odometry-edge noise params -- tunable without recompiling (refactor plan Step 1).
+    graph_slam_solver_->set_odom_noise_params(
+        this->declare_parameter<double>("odom.sigma_v_frac", 0.025),
+        this->declare_parameter<double>("odom.sigma_theta_coeff", 1.22e-4),
+        this->declare_parameter<double>("odom.slip_inflation", 1.0));
+
     auto observations_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     auto other_callbacks_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 

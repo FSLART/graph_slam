@@ -62,6 +62,8 @@ public:
     void set_angular_velocity(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
     void set_mission(const lart_msgs::msg::Mission::SharedPtr msg);
     void compute_predicted_pose(double stamp_sec);
+    // Step 1: set odometry-edge noise params (tunable via ROS params in the node) -- replaces 35*I.
+    void set_odom_noise_params(double sigma_v_frac, double sigma_theta_coeff, double slip_inflation);
     Eigen::Vector3d get_current_pose();
     g2o::SparseOptimizer optimizer_;
     int get_lap(){return current_lap_;};
@@ -79,6 +81,14 @@ private:
     float velocity_ = 0.0;
     float angular_velocity_ = 0.0;
     double last_predict_stamp_sec_ = -1.0; // Step 0: last dynamics header stamp [s]; <0 = uninitialized
+
+    // Step 1: odometry-edge information (real per-DoF, real units) -- replaces the 35*I magic
+    // number. Tunable via ROS params (graph_slam_node). See graph_slam_refactor_plan.md Step 1.
+    double odom_sigma_v_frac_      = 0.025;   // wheel-speed / rolling-radius scale error (fraction of v)
+    double odom_sigma_theta_coeff_ = 1.22e-4; // gyro angle-random-walk coeff [rad/sqrt(s)] (MTi-680G)
+    double odom_slip_inflation_    = 1.0;     // x sigma_ds when slip detected (detection: TODO Step 1b)
+    double odom_sigma_ds_floor_    = 1e-3;    // min per-step translation sigma [m] (avoids inf info at v~0)
+    double odom_sigma_theta_floor_ = 1e-5;    // min per-step heading sigma [rad]
 
     //Mutexes
     std::mutex pose_mutex_;

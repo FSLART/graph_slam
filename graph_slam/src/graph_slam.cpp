@@ -468,6 +468,18 @@ void GraphSLAM::set_angular_velocity(const geometry_msgs::msg::Vector3Stamped::S
     RCLCPP_DEBUG(rclcpp::get_logger("graph_slam_solver"), "Received IMU angular velocity message: %f", this->angular_velocity_);
 }
 
+// Step 1: odometry-edge noise params, set from ROS params by the node so they can be tuned
+// against ATE without recompiling. See graph_slam_refactor_plan.md Step 1.
+void GraphSLAM::set_odom_noise_params(double sigma_v_frac, double sigma_theta_coeff, double slip_inflation)
+{
+    this->odom_sigma_v_frac_      = sigma_v_frac;
+    this->odom_sigma_theta_coeff_ = sigma_theta_coeff;
+    this->odom_slip_inflation_    = slip_inflation;
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),
+                "Step 1 odom noise: sigma_v_frac=%.4f sigma_theta_coeff=%.2e slip_inflation=%.1f",
+                sigma_v_frac, sigma_theta_coeff, slip_inflation);
+}
+
 void GraphSLAM::set_mission(const lart_msgs::msg::Mission::SharedPtr msg)
 {
     if(!mission_set_){
@@ -560,7 +572,19 @@ void GraphSLAM::compute_predicted_pose(double stamp_sec)
             odom_edge->setVertex(1, new_pose_vertex);
             odom_edge->setMeasurement(SE2(dx, dy, w * dt));
 
-            odom_edge->setInformation(Eigen::Matrix3d::Identity()*35);
+            // Step 1: real per-DoF information (was Identity()*35 -- one magic number claiming
+            // equal confidence in metres and radians, constant regardless of step/turn). sigma_ds
+            // from wheel-speed/rolling-radius scale; sigma_dtheta from the gyro noise density.
+            // Isotropic in x,y (simple start; anisotropic cos/sin split deferred). Floors keep the
+            // information finite at v~0 / dt~0. Mirrors the observation-edge sigma idiom (~L200).
+            double sigma_ds  = fmax(odom_sigma_v_frac_ * fabs(v) * dt * odom_slip_inflation_,
+                                    odom_sigma_ds_floor_);
+            double sigma_dth = fmax(odom_sigma_theta_coeff_ * sqrt(dt), odom_sigma_theta_floor_);
+            Eigen::Matrix3d odom_information = Eigen::Matrix3d::Zero();
+            odom_information(0, 0) = 1.0 / (sigma_ds * sigma_ds);
+            odom_information(1, 1) = 1.0 / (sigma_ds * sigma_ds);
+            odom_information(2, 2) = 1.0 / (sigma_dth * sigma_dth);
+            odom_edge->setInformation(odom_information);
             this->optimizer_.addEdge(odom_edge);
         }
     }
