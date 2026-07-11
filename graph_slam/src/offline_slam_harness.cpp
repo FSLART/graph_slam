@@ -21,6 +21,7 @@
 #include <rosgraph_msgs/msg/clock.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -125,6 +126,33 @@ int main(int argc, char ** argv)
     if (a.t != b.t) return a.t < b.t;
     return a.type < b.type;  // IMU updates omega before the DYN prediction that consumes it
   });
+
+  // ---- standstill gate: mirror the car's SLAM init -- keep ONE at-rest snapshot,
+  // then resume at the first moving frame. On the car, SLAM takes a single rpm==0
+  // snapshot and only starts integrating once rpm>0, to avoid accumulating bias
+  // (repeated cone re-observations + optimizer churn) while parked at the origin.
+  // Here: find the last rest (rpm==0) dynamics frame immediately before the first
+  // rpm>0 frame and drop every event before it. Disable with GRAPH_SLAM_STANDSTILL_GATE=0.
+  const char * gate_env = std::getenv("GRAPH_SLAM_STANDSTILL_GATE");
+  if (!(gate_env && std::string(gate_env) == "0")) {
+    std::vector<std::pair<double, uint16_t>> rpm_t;  // (sim stamp, rpm), time-sorted
+    rpm_t.reserve(dyns.size());
+    for (const auto & d : dyns) rpm_t.emplace_back(d.first, d.second->rpm);
+    std::sort(rpm_t.begin(), rpm_t.end(),
+              [](const auto & a, const auto & b) { return a.first < b.first; });
+    size_t k = 0;
+    while (k < rpm_t.size() && rpm_t[k].second == 0) ++k;
+    if (k > 0 && k < rpm_t.size()) {
+      const double t_anchor = rpm_t[k - 1].first;  // last at-rest frame = the anchor snapshot
+      const size_t before = events.size();
+      events.erase(std::remove_if(events.begin(), events.end(),
+                     [t_anchor](const Ev & e) { return e.t < t_anchor; }),
+                   events.end());
+      std::cerr << "[offline] standstill gate: anchor at last-rest t=" << t_anchor
+                << "s, dropped " << (before - events.size()) << " pre-motion events ("
+                << k << " rest dyn frames)\n";
+    }
+  }
 
   // ---- drive the SLAM synchronously ----
   GraphSLAM slam;
