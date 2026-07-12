@@ -558,6 +558,13 @@ void GraphSLAM::set_anchor_mode(int mode)
                 "Observation anchor mode: %d (%s)", mode, name);
 }
 
+void GraphSLAM::set_cog_to_rear_axle(double lr_m)
+{
+    this->cog_to_rear_axle_m_ = lr_m;
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),
+                "DR kinematic side-slip: cog_to_rear_axle = %.4f m (0 disables the v_y term)", lr_m);
+}
+
 // Step 3 (Fix D interim): nearest pose-history entry to time t (clamped to the buffer ends).
 // At the ~200 Hz dynamics rate the entries are ~5 ms apart, so nearest-neighbour is well within
 // the latency estimate's own uncertainty and no interpolation is needed.
@@ -640,18 +647,29 @@ void GraphSLAM::compute_predicted_pose(double stamp_sec)
     double w = static_cast<double>(this->angular_velocity_);
     double theta = current_pose_[2];
 
-    // Unicycle increment in the BODY frame of the step-start pose. g2o's EdgeSE2 measurement
-    // is defined in the FROM-vertex body frame, so the odometry edge must use these; the
-    // world-frame (dx, dy) derived below is only for integrating current_pose_. (Passing the
-    // world-frame delta to setMeasurement was the frame bug that warped every solve.)
+    // DR kinematic side-slip: the CoG carries a lateral body-frame velocity v_y = lr*w whenever
+    // the vehicle yaws, even with zero tire slip (rigid-body kinematics from the rear axle's
+    // near-zero lateral velocity). The prior model assumed v_y=0 (pure unicycle), which showed
+    // up as a track-position error that best-fit a spurious ~120ms time lag; it was actually this
+    // missing geometric term (validated on gtbag3, corr 1.000 with measured course deviation).
+    double vy = cog_to_rear_axle_m_ * w;
+
+    // Constant-(v, vy, w) arc increment in the BODY frame of the step-start pose (closed-form
+    // integral of a body-frame velocity vector rotating at rate w). g2o's EdgeSE2 measurement is
+    // defined in the FROM-vertex body frame, so the odometry edge must use these; the world-frame
+    // (dx, dy) derived below is only for integrating current_pose_. Reduces to the pure-unicycle
+    // formula when vy=0. (Passing the world-frame delta to setMeasurement was the frame bug fixed
+    // separately.)
     double dx_body = 0.0;
     double dy_body = 0.0;
     if (abs(w) > 0.01) {
-        dx_body = (v / w) * sin(w * dt);
-        dy_body = (v / w) * (1.0 - cos(w * dt));
+        dx_body = (v / w) * sin(w * dt) - (vy / w) * (1.0 - cos(w * dt));
+        dy_body = (v / w) * (1.0 - cos(w * dt)) + (vy / w) * sin(w * dt);
     } else {
+        // vy = lr*w -> 0 along with w, but vy*dt = lr*w*dt is first-order in w and does not
+        // vanish at the same rate as the (v/w)-type terms above; keep it explicitly.
         dx_body = v * dt;
-        dy_body = 0.0;
+        dy_body = vy * dt;
     }
     double dx = cos(theta) * dx_body - sin(theta) * dy_body;
     double dy = sin(theta) * dx_body + cos(theta) * dy_body;

@@ -32,6 +32,10 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
     graph_slam_solver_->set_anchor_mode(
         this->declare_parameter<int>("observation.anchor_mode", 2));
 
+    // DR kinematic side-slip: CoG-to-rear-axle distance (0 disables, restoring pure unicycle DR).
+    graph_slam_solver_->set_cog_to_rear_axle(
+        this->declare_parameter<double>("dr.cog_to_rear_axle_m", 0.6975));
+
     auto observations_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     auto other_callbacks_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 

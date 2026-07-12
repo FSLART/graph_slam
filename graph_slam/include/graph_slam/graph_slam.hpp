@@ -76,6 +76,12 @@ public:
     // pre-Step-3 behaviour), 1 = CONST (ignore any stamp, use latest predict - obs_latency),
     // 2 = STAMP (per-frame header stamp = capture time; falls back to CONST when unstamped).
     void set_anchor_mode(int mode);
+    // DR kinematic side-slip: CoG-to-rear-axle distance [m]. Rigid-body kinematics give the
+    // CoG lateral velocity v_y = lr * yaw_rate whenever the rear axle has ~zero lateral velocity
+    // (the standard no-slip kinematic-bicycle assumption -- validated on gtbag3: this term alone
+    // explains measured CoG course-vs-heading deviation to correlation 1.000, residual true tire
+    // slip ~0.3 deg). The prior unicycle DR (v_y=0) is the lr=0 special case.
+    void set_cog_to_rear_axle(double lr_m);
     Eigen::Vector3d get_current_pose();
     g2o::SparseOptimizer optimizer_;
     int get_lap(){return current_lap_;};
@@ -93,6 +99,11 @@ private:
     float velocity_ = 0.0;
     float angular_velocity_ = 0.0;
     double last_predict_stamp_sec_ = -1.0; // Step 0: last dynamics header stamp [s]; <0 = uninitialized
+
+    // DR kinematic side-slip term: v_y_body = cog_to_rear_axle_m_ * yaw_rate. Default matches
+    // PacSim's corrected vehicleModel.yaml lr (0.8525+0.6975=1.55 m wheelbase); update to the
+    // real car's measured CoG-to-rear-axle distance when known.
+    double cog_to_rear_axle_m_ = 0.6975;
 
     // Step 1: odometry-edge information (real per-DoF, real units) -- replaces the 35*I magic
     // number. Tunable via ROS params (graph_slam_node). See graph_slam_refactor_plan.md Step 1.
