@@ -1,3 +1,26 @@
+// =============================================================================
+// FRAME POLICY -- base frame = REAR AXLE.
+//
+// The estimator integrates and publishes the REAR-AXLE pose. The DR input v
+// (inverter / rear-wheel speed) is native to the rear axle, and the rear axle has
+// ~zero lateral velocity, so the pure unicycle in compute_predicted_pose() is a
+// correct rear-axle estimator (yaw rate omega is position-independent). Pure
+// pursuit consumes the rear-axle pose directly.
+//
+// Cone observations arrive in the CAMERA frame; process_observations() /
+// localize_in_map() transform them into the rear-axle base frame with the camera
+// extrinsic (camera_extrinsic_{x,y,yaw}_) BEFORE the pose + R(theta)*obs global
+// step. In PacSim the front sensor sits at the CoG (perception.yaml pose [0,0,0];
+// the vehicle origin is the CoG), so the sim extrinsic x == lr (0.6975 m); the real
+// car's camera is ~0.69 m forward of the rear axle. These are two DISTINCT offsets
+// that happen to be nearly equal -- keep them apart (extrinsic here in the
+// estimator; lr only in the harness GT transform).
+//
+// Ground-truth reference-point conventions (PacSim reports GT at the CoG) are an
+// EVAL concern handled in the harness (run_eval --gt-ref), NOT in the estimator.
+// If a CoG pose is ever needed downstream it is an OUTPUT transform at publish time,
+// never a term in the motion model.
+// =============================================================================
 #include "graph_slam/graph_slam.hpp"
 
 using std::placeholders::_1;
@@ -104,6 +127,9 @@ void GraphSLAM::build_map_kdtree()
 
 void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose)
 {
+    // NOTE: observations already arrive in the REAR-AXLE BASE frame -- process_observations()
+    // applies the camera extrinsic at intake. Do NOT re-apply it here. The range gate below
+    // (obs_dist > 10) is therefore in base range, ~camera_extrinsic_x_ longer than camera range.
     if (!map_kdtree_ready_) {
         RCLCPP_WARN(
             rclcpp::get_logger("graph_slam_solver"),
@@ -322,7 +348,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
             cone.x = cone_msg.position.x;
             cone.y = cone_msg.position.y;
             cone.type = cone_msg.class_type.data;
-            not_added_observations.push_back(cone);
+            not_added_observations.push_back(camera_to_base(cone));  // base frame for viz consistency
         }
         return this->get_map(not_added_observations); // Skip processing if the robot is not moving
     }
@@ -373,13 +399,15 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
     std::vector<graph_slam_types::Cone> observations;
     if (v_pose){
 
-        //get observation cones
+        //get observation cones -- transform camera frame -> rear-axle base frame at intake
+        //(camera extrinsic), so all downstream geometry (association, edges, localization, the
+        //pose+R(theta)*obs global step) operates in the base frame. See the frame policy at top.
         for (const auto& cone_msg : msg->cones) {
             graph_slam_types::Cone cone;
             cone.x = cone_msg.position.x;
             cone.y = cone_msg.position.y;
             cone.type = cone_msg.class_type.data;
-            observations.push_back(cone);
+            observations.push_back(camera_to_base(cone));
         }
 
         // Use localization mode
@@ -558,11 +586,26 @@ void GraphSLAM::set_anchor_mode(int mode)
                 "Observation anchor mode: %d (%s)", mode, name);
 }
 
-void GraphSLAM::set_cog_to_rear_axle(double lr_m)
+void GraphSLAM::set_camera_extrinsic(double x_m, double y_m, double yaw_rad)
 {
-    this->cog_to_rear_axle_m_ = lr_m;
+    this->camera_extrinsic_x_ = x_m;
+    this->camera_extrinsic_y_ = y_m;
+    this->camera_extrinsic_yaw_ = yaw_rad;
     RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),
-                "DR kinematic side-slip: cog_to_rear_axle = %.4f m (0 disables the v_y term)", lr_m);
+                "Camera extrinsic (camera->rear-axle base): x=%.4f m y=%.4f m yaw=%.4f rad "
+                "(0/0/0 = observations already in base frame)", x_m, y_m, yaw_rad);
+}
+
+// Transform one observation from the CAMERA frame into the rear-axle BASE frame:
+// obs_base = R(yaw)*obs + [x, y]. Applied at cone intake before any pose+R(theta)*obs step.
+graph_slam_types::Cone GraphSLAM::camera_to_base(const graph_slam_types::Cone& obs) const
+{
+    const double c = std::cos(camera_extrinsic_yaw_);
+    const double s = std::sin(camera_extrinsic_yaw_);
+    graph_slam_types::Cone out = obs;  // carry type/id/etc.
+    out.x = c * obs.x - s * obs.y + camera_extrinsic_x_;
+    out.y = s * obs.x + c * obs.y + camera_extrinsic_y_;
+    return out;
 }
 
 // Step 3 (Fix D interim): nearest pose-history entry to time t (clamped to the buffer ends).
@@ -647,29 +690,23 @@ void GraphSLAM::compute_predicted_pose(double stamp_sec)
     double w = static_cast<double>(this->angular_velocity_);
     double theta = current_pose_[2];
 
-    // DR kinematic side-slip: the CoG carries a lateral body-frame velocity v_y = lr*w whenever
-    // the vehicle yaws, even with zero tire slip (rigid-body kinematics from the rear axle's
-    // near-zero lateral velocity). The prior model assumed v_y=0 (pure unicycle), which showed
-    // up as a track-position error that best-fit a spurious ~120ms time lag; it was actually this
-    // missing geometric term (validated on gtbag3, corr 1.000 with measured course deviation).
-    double vy = cog_to_rear_axle_m_ * w;
-
-    // Constant-(v, vy, w) arc increment in the BODY frame of the step-start pose (closed-form
-    // integral of a body-frame velocity vector rotating at rate w). g2o's EdgeSE2 measurement is
-    // defined in the FROM-vertex body frame, so the odometry edge must use these; the world-frame
-    // (dx, dy) derived below is only for integrating current_pose_. Reduces to the pure-unicycle
-    // formula when vy=0. (Passing the world-frame delta to setMeasurement was the frame bug fixed
-    // separately.)
+    // REAR-AXLE unicycle DR (see frame policy at top of file). The input v is the rear-wheel
+    // inverter speed and the rear axle has ~zero lateral velocity, so the rear-axle point moves at
+    // (v, 0) in the body frame -- a pure unicycle. Closed-form constant-(v, w) arc integral in the
+    // BODY frame of the step-start pose; g2o's EdgeSE2 measurement is defined in that frame, so the
+    // odometry edge uses (dx_body, dy_body) directly. The world-frame (dx, dy) below is only for
+    // integrating current_pose_. (A CoG side-slip term v_y=lr*w was tried and REVERTED: it merely
+    // rebased the estimate rear-axle->CoG to match PacSim's CoG-referenced GT -- a reference-point
+    // change, not an estimation fix; proven to 0.00 mm on the mapping lap. Reference-point
+    // reconciliation belongs in the harness / camera extrinsic, not the motion model.)
     double dx_body = 0.0;
     double dy_body = 0.0;
     if (abs(w) > 0.01) {
-        dx_body = (v / w) * sin(w * dt) - (vy / w) * (1.0 - cos(w * dt));
-        dy_body = (v / w) * (1.0 - cos(w * dt)) + (vy / w) * sin(w * dt);
+        dx_body = (v / w) * sin(w * dt);
+        dy_body = (v / w) * (1.0 - cos(w * dt));
     } else {
-        // vy = lr*w -> 0 along with w, but vy*dt = lr*w*dt is first-order in w and does not
-        // vanish at the same rate as the (v/w)-type terms above; keep it explicitly.
         dx_body = v * dt;
-        dy_body = vy * dt;
+        dy_body = 0.0;
     }
     double dx = cos(theta) * dx_body - sin(theta) * dy_body;
     double dy = sin(theta) * dx_body + cos(theta) * dy_body;

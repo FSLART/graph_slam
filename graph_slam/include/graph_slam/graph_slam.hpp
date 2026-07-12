@@ -76,12 +76,12 @@ public:
     // pre-Step-3 behaviour), 1 = CONST (ignore any stamp, use latest predict - obs_latency),
     // 2 = STAMP (per-frame header stamp = capture time; falls back to CONST when unstamped).
     void set_anchor_mode(int mode);
-    // DR kinematic side-slip: CoG-to-rear-axle distance [m]. Rigid-body kinematics give the
-    // CoG lateral velocity v_y = lr * yaw_rate whenever the rear axle has ~zero lateral velocity
-    // (the standard no-slip kinematic-bicycle assumption -- validated on gtbag3: this term alone
-    // explains measured CoG course-vs-heading deviation to correlation 1.000, residual true tire
-    // slip ~0.3 deg). The prior unicycle DR (v_y=0) is the lr=0 special case.
-    void set_cog_to_rear_axle(double lr_m);
+    // Camera extrinsic (camera -> rear-axle base frame): obs_base = R(yaw)*obs + [x, y]. Applied
+    // at cone intake before the pose+R(theta)*obs global step. In PacSim the front sensor is at the
+    // CoG (perception.yaml pose [0,0,0]) so x == lr (0.6975 m); real car camera ~0.69 m fwd of the
+    // rear axle. 0/0/0 leaves observations in the base frame (pre-refactor behavior). See the frame
+    // policy at the top of graph_slam.cpp -- keep x DISTINCT from the harness GT-transform lr.
+    void set_camera_extrinsic(double x_m, double y_m, double yaw_rad);
     Eigen::Vector3d get_current_pose();
     g2o::SparseOptimizer optimizer_;
     int get_lap(){return current_lap_;};
@@ -100,10 +100,12 @@ private:
     float angular_velocity_ = 0.0;
     double last_predict_stamp_sec_ = -1.0; // Step 0: last dynamics header stamp [s]; <0 = uninitialized
 
-    // DR kinematic side-slip term: v_y_body = cog_to_rear_axle_m_ * yaw_rate. Default matches
-    // PacSim's corrected vehicleModel.yaml lr (0.8525+0.6975=1.55 m wheelbase); update to the
-    // real car's measured CoG-to-rear-axle distance when known.
-    double cog_to_rear_axle_m_ = 0.6975;
+    // Camera extrinsic: camera -> rear-axle base frame (see set_camera_extrinsic). 0/0/0 keeps
+    // observations in the base frame (pre-refactor behavior, for a clean A/B). Sim default (front
+    // sensor at CoG) is 0.6975/0/0; real car ~0.69/0/0.
+    double camera_extrinsic_x_   = 0.69;
+    double camera_extrinsic_y_   = 0.0;
+    double camera_extrinsic_yaw_ = 0.0;
 
     // Step 1: odometry-edge information (real per-DoF, real units) -- replaces the 35*I magic
     // number. Tunable via ROS params (graph_slam_node). See graph_slam_refactor_plan.md Step 1.
@@ -170,6 +172,9 @@ private:
     
     //optimize graph
     void update_graph();
+
+    // Camera -> rear-axle base frame transform for one observation (see set_camera_extrinsic).
+    graph_slam_types::Cone camera_to_base(const graph_slam_types::Cone& obs) const;
 
     //Pose correction
     void localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose);

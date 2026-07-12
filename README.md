@@ -6,6 +6,27 @@ A ROS 2 (`ament_cmake`) package implementing graph-based SLAM for cone observati
 
 The main node, [`GraphSLAM_Node`](graph_slam/include/graph_slam/graph_slam_node.hpp), wraps the solver class [`GraphSLAM`](graph_slam/include/graph_slam/graph_slam.hpp) (implemented in [graph_slam/src/graph_slam.cpp](graph_slam/src/graph_slam.cpp)).
 
+### Frame policy — base frame = REAR AXLE
+
+The estimator integrates and **publishes the rear-axle pose**. The dead-reckoning input `v`
+(inverter / rear-wheel speed) is native to the rear axle, which has ~zero lateral velocity, so the
+pure unicycle in `compute_predicted_pose()` is a correct rear-axle estimator (yaw rate `omega` is
+position-independent). **Pure pursuit consumes the rear-axle pose directly.**
+
+Cone observations arrive in the **camera** frame and are transformed to the rear-axle base frame at
+intake via the `camera_extrinsic.{x,y,yaw}` params (`obs_base = R(yaw)*obs + [x,y]`), before the
+`pose + R(theta)*obs` global step. In PacSim the front sensor sits at the CoG (`perception.yaml`
+pose `[0,0,0]`), so the sim extrinsic `x == lr` (0.6975 m); the real car's camera is ~0.69 m forward
+of the rear axle. This offset is physically **distinct** from the CoG-to-rear distance `lr` used by
+the eval harness's `--gt-ref` transform even though the two are nearly equal — keep them apart.
+
+Ground-truth reference-point conventions (PacSim reports GT at the **CoG**) are an **eval** concern
+handled in the harness (`run_eval --gt-ref rear|cog`), never in the estimator. A CoG pose, if ever
+needed downstream, is an output-side transform at publish time — never a term in the motion model.
+(An earlier CoG side-slip DR term `v_y=lr*omega` was reverted: it only rebased the estimate onto the
+CoG to match CoG-referenced GT — a reference-point change proven identical to 0.00 mm, not an
+estimation fix.)
+
 ### Subscribed topics
 
 | Topic | Message | Purpose |

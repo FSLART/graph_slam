@@ -32,9 +32,14 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
     graph_slam_solver_->set_anchor_mode(
         this->declare_parameter<int>("observation.anchor_mode", 2));
 
-    // DR kinematic side-slip: CoG-to-rear-axle distance (0 disables, restoring pure unicycle DR).
-    graph_slam_solver_->set_cog_to_rear_axle(
-        this->declare_parameter<double>("dr.cog_to_rear_axle_m", 0.6975));
+    // Camera extrinsic (camera -> rear-axle base frame) applied at cone intake. Default is the
+    // real-car mount (~0.69 m fwd of the rear axle, centered, straight ahead). In PacSim the front
+    // sensor is at the CoG, so override x to lr (0.6975). 0/0/0 = observations already in base
+    // frame. See the frame policy at the top of graph_slam.cpp.
+    graph_slam_solver_->set_camera_extrinsic(
+        this->declare_parameter<double>("camera_extrinsic.x", 0.69),
+        this->declare_parameter<double>("camera_extrinsic.y", 0.0),
+        this->declare_parameter<double>("camera_extrinsic.yaw", 0.0));
 
     auto observations_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     auto other_callbacks_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
