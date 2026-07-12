@@ -20,6 +20,18 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
         this->declare_parameter<double>("odom.sigma_theta_coeff", 1.22e-4),
         this->declare_parameter<double>("odom.slip_inflation", 1.0));
 
+    // Fix F.1: iteration cap for the final map optimization at the mapping->localization switch.
+    graph_slam_solver_->set_final_optimize_max_iters(
+        this->declare_parameter<int>("final_optimize.max_iterations", 50));
+
+    // Step 3 (Fix D interim): assumed /mapping/cones pipeline latency (frames are unstamped).
+    graph_slam_solver_->set_obs_latency(
+        this->declare_parameter<double>("observation.latency_sec", 0.09));
+
+    // Observation anchoring: 0=NEWEST, 1=CONST(latency), 2=STAMP(per-frame header, default).
+    graph_slam_solver_->set_anchor_mode(
+        this->declare_parameter<int>("observation.anchor_mode", 2));
+
     auto observations_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     auto other_callbacks_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 

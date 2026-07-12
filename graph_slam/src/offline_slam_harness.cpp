@@ -37,7 +37,10 @@ int main(int argc, char ** argv)
 {
   if (argc < 3) {
     std::cerr << "usage: graph_slam_offline <bag_dir> <out_csv> "
-                 "[sigma_v_frac sigma_theta_coeff slip_inflation]\n";
+                 "[sigma_v_frac sigma_theta_coeff slip_inflation final_opt_iters obs_latency "
+                 "anchor_mode]\n"
+                 "(final_opt_iters=1 restores the pre-Fix-F.1 single-iteration final solve;\n"
+                 " anchor_mode: 0=NEWEST[pre-Step3] 1=CONST[obs_latency] 2=STAMP[per-frame,default])\n";
     return 1;
   }
   rclcpp::init(argc, argv);  // for logging only; no node/executor is created
@@ -47,6 +50,9 @@ int main(int argc, char ** argv)
   const double sigma_v_frac      = (argc > 3) ? std::stod(argv[3]) : 0.025;
   const double sigma_theta_coeff = (argc > 4) ? std::stod(argv[4]) : 1.22e-4;
   const double slip_inflation    = (argc > 5) ? std::stod(argv[5]) : 1.0;
+  const int final_opt_iters      = (argc > 6) ? std::stoi(argv[6]) : 50;
+  const double obs_latency       = (argc > 7) ? std::stod(argv[7]) : 0.09;
+  const int anchor_mode          = (argc > 8) ? std::stoi(argv[8]) : 2;  // 0=NEWEST 1=CONST 2=STAMP
 
   // ---- read the whole bag into typed, per-topic buffers ----
   rosbag2_storage::StorageOptions storage_options;
@@ -157,6 +163,9 @@ int main(int argc, char ** argv)
   // ---- drive the SLAM synchronously ----
   GraphSLAM slam;
   slam.set_odom_noise_params(sigma_v_frac, sigma_theta_coeff, slip_inflation);
+  slam.set_final_optimize_max_iters(final_opt_iters);
+  slam.set_obs_latency(obs_latency);
+  slam.set_anchor_mode(anchor_mode);
   if (mission) slam.set_mission(mission);
 
   std::ofstream csv(out_csv);

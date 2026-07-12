@@ -20,6 +20,7 @@
 #include <visualization_msgs/msg/marker.hpp>
 
 #include <chrono>
+#include <deque>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <g2o/core/sparse_optimizer.h>
@@ -65,6 +66,16 @@ public:
     void compute_predicted_pose(double stamp_sec);
     // Step 1: set odometry-edge noise params (tunable via ROS params in the node) -- replaces 35*I.
     void set_odom_noise_params(double sigma_v_frac, double sigma_theta_coeff, double slip_inflation);
+    // Fix F.1: iteration cap for the one-time final map optimization at the mapping->localization
+    // switch (the existing terminate action's gain threshold still stops it earlier on convergence).
+    void set_final_optimize_max_iters(int max_iters);
+    // Step 3 (Fix D interim): assumed /mapping/cones pipeline latency [s]. Cone frames are
+    // unstamped, so observations are anchored to the pose this long before the newest predict.
+    void set_obs_latency(double latency_sec);
+    // Observation anchoring mode (A/B + robustness knob): 0 = NEWEST (anchor to the latest pose,
+    // pre-Step-3 behaviour), 1 = CONST (ignore any stamp, use latest predict - obs_latency),
+    // 2 = STAMP (per-frame header stamp = capture time; falls back to CONST when unstamped).
+    void set_anchor_mode(int mode);
     Eigen::Vector3d get_current_pose();
     g2o::SparseOptimizer optimizer_;
     int get_lap(){return current_lap_;};
@@ -90,6 +101,21 @@ private:
     double odom_slip_inflation_    = 1.0;     // x sigma_ds when slip detected (detection: TODO Step 1b)
     double odom_sigma_ds_floor_    = 1e-3;    // min per-step translation sigma [m] (avoids inf info at v~0)
     double odom_sigma_theta_floor_ = 1e-5;    // min per-step heading sigma [rad]
+
+    // Fix F.1: final map optimization at the mode switch runs to convergence under this cap
+    // (was a single hardcoded iteration, which froze the map at its dead-reckoning warp).
+    int final_optimize_max_iters_ = 50;
+    g2o::SparseOptimizerTerminateAction* terminate_action_ = nullptr;
+
+    // Step 3 (Fix D interim): stamped pose history for anchoring observations at capture time.
+    // /mapping/cones carries no stamp, so capture time is approximated as
+    // (latest predict stamp - obs_latency_sec_). vertex_id is -1 in localization mode (no
+    // graph vertices are created there). Guarded by pose_mutex_.
+    struct StampedPose { double t; Eigen::Vector3d pose; long vertex_id; };
+    std::deque<StampedPose> pose_history_;
+    double obs_latency_sec_ = 0.09;   // measured ~90 ms on ground_truth_bag2 (REFACTOR_LOG)
+    int obs_anchor_mode_ = 2;         // 0=NEWEST, 1=CONST, 2=STAMP (default: per-frame stamp)
+    bool lookup_pose_at(double t, Eigen::Vector3d& pose, long& vertex_id);
 
     // Step 2: pose covariance Sigma (x,y,theta). Grown in compute_predicted_pose (F*S*F'+Q),
     // reset/updated at map corrections (computeMarginals + Kalman). Initialized in the ctor.

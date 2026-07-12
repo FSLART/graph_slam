@@ -23,12 +23,13 @@ GraphSLAM::GraphSLAM()
     
     optimizer_.setAlgorithm(solver);
 
-    SparseOptimizerTerminateAction* terminate_action = new SparseOptimizerTerminateAction();
+    terminate_action_ = new SparseOptimizerTerminateAction();
 
-    //Set stop criteria for optimization
-    terminate_action->setMaxIterations(10);
-    terminate_action->setGainThreshold(1e-4);
-    optimizer_.addPostIterationAction(terminate_action);
+    //Set stop criteria for optimization. The action's iteration cap must not undercut the
+    //final-optimize cap (Fix F.1); windowed solves stay bounded by their own optimize(N) anyway.
+    terminate_action_->setMaxIterations(final_optimize_max_iters_);
+    terminate_action_->setGainThreshold(1e-4);
+    optimizer_.addPostIterationAction(terminate_action_);
 
     
     VertexSE2* initial_pose = new VertexSE2();
@@ -277,11 +278,14 @@ void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observation
 
     // Soft (Kalman) update: blend by relative confidence instead of teleporting -> continuous
     // output, no jerk, and even a partial nudge always moves the right way.
+    // Step 3 (Fix D interim): robot_pose is the CAPTURE-time pose, so apply the blended
+    // innovation as a world-frame delta onto the CURRENT pose -- predictions integrated since
+    // capture are preserved instead of being overwritten by a stale corrected pose.
     const Eigen::Matrix3d K = Sigma_pred * S_inv;
-    Eigen::Vector3d updated = robot_pose + K * delta;
-    updated[2] = atan2(sin(updated[2]), cos(updated[2]));
     {
         std::lock_guard<std::mutex> lock(pose_mutex_);
+        Eigen::Vector3d updated = current_pose_ + K * delta;
+        updated[2] = atan2(sin(updated[2]), cos(updated[2]));
         current_pose_ = updated;
         pose_cov_ = (Eigen::Matrix3d::Identity() - K) * Sigma_pred;
     }
@@ -328,7 +332,36 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
     this->observation_count_++;
 
     const long current_pose_id = pose_id_counter_;
-    const auto robot_pose_ =this->current_pose_;
+    // Step 3 / Fix D: anchor the frame at its CAPTURE time -- association, and (in mapping mode)
+    // the observation edge's pose vertex, use the pose from then. Anchoring to the newest pose
+    // baked a systematic v*latency along-track shift (~0.45 m at 5 m/s) into every edge.
+    // Capture time: the frame's own header stamp when present (bridge copies PacSim's capture
+    // stamp); for unstamped frames (older bags / unpatched pipelines) fall back to the constant
+    // (latest predict stamp - obs_latency_sec_). Falls back to the newest pose while the history
+    // is empty.
+    Eigen::Vector3d robot_pose_ = this->current_pose_;
+    long anchor_pose_id = current_pose_id;
+    if (obs_anchor_mode_ != 0) {  // mode 0 (NEWEST): skip -- keep current_pose_ / newest vertex
+        const double msg_stamp_sec = static_cast<double>(msg->header.stamp.sec)
+                                     + static_cast<double>(msg->header.stamp.nanosec) * 1e-9;
+        double capture_t;
+        if (obs_anchor_mode_ == 2 && msg_stamp_sec > 0.0) {
+            capture_t = msg_stamp_sec;
+            RCLCPP_INFO_ONCE(rclcpp::get_logger("graph_slam_solver"),
+                             "Anchor mode STAMP -> per-frame capture time from cone header stamp");
+        } else {
+            capture_t = last_predict_stamp_sec_ - obs_latency_sec_;
+            RCLCPP_INFO_ONCE(rclcpp::get_logger("graph_slam_solver"),
+                             "Anchor mode CONST (or unstamped) -> constant obs latency %.0f ms",
+                             obs_latency_sec_ * 1e3);
+        }
+        Eigen::Vector3d capture_pose;
+        long capture_vertex_id;
+        if (lookup_pose_at(capture_t, capture_pose, capture_vertex_id)) {
+            robot_pose_ = capture_pose;
+            if (capture_vertex_id >= 0) anchor_pose_id = capture_vertex_id;
+        }
+    }
     g2o::OptimizableGraph::Vertex* v_pose = nullptr;
     g2o::OptimizableGraph::VertexIDMap verts;
     {
@@ -439,7 +472,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
 
             {
                 std::lock_guard<std::mutex> lock(optimizer_mutex_);
-                edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(current_pose_id)));//use the last pose inserted
+                edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(anchor_pose_id)));//Step 3: pose vertex at capture time (was the newest one)
                 edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer_.vertex(landmark_id)));
             }
             edge->setMeasurement(Eigen::Vector2d(observations[i].x, observations[i].y));
@@ -502,6 +535,56 @@ void GraphSLAM::set_odom_noise_params(double sigma_v_frac, double sigma_theta_co
                 sigma_v_frac, sigma_theta_coeff, slip_inflation);
 }
 
+void GraphSLAM::set_final_optimize_max_iters(int max_iters)
+{
+    this->final_optimize_max_iters_ = max_iters;
+    if (terminate_action_) terminate_action_->setMaxIterations(max_iters);
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),
+                "Fix F.1 final-optimize iteration cap: %d", max_iters);
+}
+
+void GraphSLAM::set_obs_latency(double latency_sec)
+{
+    this->obs_latency_sec_ = latency_sec;
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),
+                "Step 3 observation latency compensation: %.0f ms", latency_sec * 1e3);
+}
+
+void GraphSLAM::set_anchor_mode(int mode)
+{
+    this->obs_anchor_mode_ = mode;
+    const char* name = (mode == 0) ? "NEWEST" : (mode == 1) ? "CONST" : "STAMP";
+    RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),
+                "Observation anchor mode: %d (%s)", mode, name);
+}
+
+// Step 3 (Fix D interim): nearest pose-history entry to time t (clamped to the buffer ends).
+// At the ~200 Hz dynamics rate the entries are ~5 ms apart, so nearest-neighbour is well within
+// the latency estimate's own uncertainty and no interpolation is needed.
+bool GraphSLAM::lookup_pose_at(double t, Eigen::Vector3d& pose, long& vertex_id)
+{
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    if (pose_history_.empty()) {
+        return false;
+    }
+    const StampedPose* best = &pose_history_.front();
+    for (auto it = pose_history_.rbegin(); it != pose_history_.rend(); ++it) {
+        if (it->t <= t) {
+            // it = last entry at/before t; the previous rbegin-side entry is the first after it
+            best = &(*it);
+            if (it != pose_history_.rbegin()) {
+                const StampedPose& after = *std::prev(it);
+                if (std::abs(after.t - t) < std::abs(it->t - t)) best = &after;
+            }
+            break;
+        }
+        best = &(*it);  // t is before this entry; keep walking (clamps to front if never <= t)
+    }
+    pose = best->pose;
+    vertex_id = best->vertex_id;
+    return true;
+}
+
 void GraphSLAM::set_mission(const lart_msgs::msg::Mission::SharedPtr msg)
 {
     if(!mission_set_){
@@ -557,15 +640,21 @@ void GraphSLAM::compute_predicted_pose(double stamp_sec)
     double w = static_cast<double>(this->angular_velocity_);
     double theta = current_pose_[2];
 
-    double dx = 0.0;
-    double dy = 0.0;
+    // Unicycle increment in the BODY frame of the step-start pose. g2o's EdgeSE2 measurement
+    // is defined in the FROM-vertex body frame, so the odometry edge must use these; the
+    // world-frame (dx, dy) derived below is only for integrating current_pose_. (Passing the
+    // world-frame delta to setMeasurement was the frame bug that warped every solve.)
+    double dx_body = 0.0;
+    double dy_body = 0.0;
     if (abs(w) > 0.01) {
-        dx = -(v / w) * sin(theta) + (v / w) * sin(theta + w * dt);
-        dy =  (v / w) * cos(theta) - (v / w) * cos(theta + w * dt);
+        dx_body = (v / w) * sin(w * dt);
+        dy_body = (v / w) * (1.0 - cos(w * dt));
     } else {
-        dx = v * cos(theta) * dt;
-        dy = v * sin(theta) * dt;
+        dx_body = v * dt;
+        dy_body = 0.0;
     }
+    double dx = cos(theta) * dx_body - sin(theta) * dy_body;
+    double dy = sin(theta) * dx_body + cos(theta) * dy_body;
 
     float distance_delta = sqrt(dx*dx + dy*dy);
     this->current_lap_distance_ += distance_delta;
@@ -615,7 +704,7 @@ void GraphSLAM::compute_predicted_pose(double stamp_sec)
             EdgeSE2* odom_edge = new EdgeSE2();
             odom_edge->setVertex(0, current_pose_vertex);
             odom_edge->setVertex(1, new_pose_vertex);
-            odom_edge->setMeasurement(SE2(dx, dy, w * dt));
+            odom_edge->setMeasurement(SE2(dx_body, dy_body, w * dt));
 
             // Step 1: real per-DoF information Omega = Sigma^-1 (was Identity()*35 -- one magic
             // number claiming equal confidence in metres and radians). sigma_ds / sigma_dth are
@@ -629,6 +718,18 @@ void GraphSLAM::compute_predicted_pose(double stamp_sec)
         }
     }
 
+    // Step 3 (Fix D interim): record (stamp, pose, graph vertex) so observation processing can
+    // anchor cone frames at their capture time instead of the newest pose. vertex_id is the
+    // vertex created above (mapping mode) or -1 (localization mode: no vertices are created).
+    {
+        std::lock_guard<std::mutex> lock(pose_mutex_);
+        pose_history_.push_back({stamp_sec, current_pose_,
+                                 localization_mode_ ? -1L : pose_id_counter_});
+        const double keep_sec = std::max(1.0, 4.0 * obs_latency_sec_);
+        while (!pose_history_.empty() && pose_history_.front().t < stamp_sec - keep_sec) {
+            pose_history_.pop_front();
+        }
+    }
 }
 
 void GraphSLAM::check_lap_completion()
@@ -692,8 +793,19 @@ void GraphSLAM::check_lap_completion()
                     optimizer_.removeVertex(vl);
                 }
 
+                // Fix F.1: optimize the full graph to convergence before freezing the map.
+                // A single iteration froze the map at its dead-reckoning warp even though the
+                // loop-closure constraints were already in the graph. One-time cost at the
+                // mode switch; the terminate action stops early once the chi2 gain is small.
                 this->optimizer_.initializeOptimization();
-                this->optimizer_.optimize(1, false);
+                this->optimizer_.computeActiveErrors();
+                const double final_chi2_before = this->optimizer_.activeChi2();
+                const int final_iters = this->optimizer_.optimize(final_optimize_max_iters_, false);
+                this->optimizer_.computeActiveErrors();
+                RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),
+                            "Final map optimization: chi2 %.1f -> %.1f in %d iterations (cap %d)",
+                            final_chi2_before, this->optimizer_.activeChi2(), final_iters,
+                            final_optimize_max_iters_);
                 this->optimizer_.save("final_graph.g2o");
                 if(this->current_mission_.data == lart_msgs::msg::Mission::AUTOCROSS || this->current_mission_.data == lart_msgs::msg::Mission::TRACKDRIVE)
                     MapManager::save_map(this->current_mission_.data, this->optimizer_);
