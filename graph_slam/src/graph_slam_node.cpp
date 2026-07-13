@@ -32,14 +32,20 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
     graph_slam_solver_->set_anchor_mode(
         this->declare_parameter<int>("observation.anchor_mode", 2));
 
-    // Camera extrinsic (camera -> rear-axle base frame) applied at cone intake. Default is the
-    // real-car mount (~0.69 m fwd of the rear axle, centered, straight ahead). In PacSim the front
-    // sensor is at the CoG, so override x to lr (0.6975). 0/0/0 = observations already in base
-    // frame. See the frame policy at the top of graph_slam.cpp.
-    graph_slam_solver_->set_camera_extrinsic(
-        this->declare_parameter<double>("camera_extrinsic.x", 0.69),
-        this->declare_parameter<double>("camera_extrinsic.y", 0.0),
-        this->declare_parameter<double>("camera_extrinsic.yaw", 0.0));
+    // Map-frame anchor (map-frame == where SLAM plants its origin). Default 0/0/0: the real-car
+    // convention -- the absolute world pose is unknown at startup, so the map frame is simply the
+    // start pose. In sim, set slam_origin.x = -lr (-0.6975) so the map frame coincides with
+    // PacSim's world/CoG frame (RAW eval metrics then become directly meaningful). Keep 0 for
+    // SKIDPAD (loads a fixed-frame bundled map). See the frame policy at the top of graph_slam.cpp.
+    graph_slam_solver_->set_initial_pose(
+        this->declare_parameter<double>("slam_origin.x", 0.0),
+        this->declare_parameter<double>("slam_origin.y", 0.0),
+        this->declare_parameter<double>("slam_origin.yaw", 0.0));
+
+    // NOTE: no camera/sensor extrinsic here -- cones on /mapping/cones arrive already in the
+    // rear-axle base frame. That transform is applied upstream, at intake, by whichever bridge
+    // publishes /mapping/cones (ZED_Bridge on the real car, lart_to_pacsim_bridge's
+    // sensor_to_base param in sim). See the frame policy at the top of graph_slam.cpp.
 
     auto observations_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     auto other_callbacks_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);

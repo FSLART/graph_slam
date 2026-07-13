@@ -7,19 +7,30 @@
 // correct rear-axle estimator (yaw rate omega is position-independent). Pure
 // pursuit consumes the rear-axle pose directly.
 //
-// Cone observations arrive in the CAMERA frame; process_observations() /
-// localize_in_map() transform them into the rear-axle base frame with the camera
-// extrinsic (camera_extrinsic_{x,y,yaw}_) BEFORE the pose + R(theta)*obs global
-// step. In PacSim the front sensor sits at the CoG (perception.yaml pose [0,0,0];
-// the vehicle origin is the CoG), so the sim extrinsic x == lr (0.6975 m); the real
-// car's camera is ~0.69 m forward of the rear axle. These are two DISTINCT offsets
-// that happen to be nearly equal -- keep them apart (extrinsic here in the
-// estimator; lr only in the harness GT transform).
+// Cone observations arrive ALREADY in the rear-axle BASE frame -- graph_slam does
+// NOT apply a sensor/camera extrinsic itself. That transform is an upstream intake
+// concern, owned by the bridge feeding /mapping/cones (ZED_Bridge on the real car,
+// lart_to_pacsim_bridge's sensor_to_base param in sim), exactly mirroring how the
+// real car already does it. graph_slam applying it too would double-apply on the
+// real car -- an earlier revision tried this (camera_extrinsic_{x,y,yaw}_ here) and
+// was reverted; see claude_code_pacsim_bridge_extrinsic_prompt.md Phase 0.
 //
 // Ground-truth reference-point conventions (PacSim reports GT at the CoG) are an
 // EVAL concern handled in the harness (run_eval --gt-ref), NOT in the estimator.
 // If a CoG pose is ever needed downstream it is an OUTPUT transform at publish time,
 // never a term in the motion model.
+//
+// MAP-FRAME ANCHOR (set_initial_pose / slam_origin params). The graph's fixed first
+// vertex and the DR seed default to (0,0,0): the real-car convention -- the map frame
+// is simply wherever SLAM starts, since its absolute world pose is unknown at startup.
+// In SIM the launch/harness sets the anchor to (-lr, 0, 0) so the map frame coincides
+// with PacSim's world/CoG frame (PacSim spawns the CoG at the world origin, so the rear
+// axle -- the base frame -- starts at -lr). This is purely a frame choice: it makes RAW
+// (unaligned) eval metrics directly meaningful and leaves SLAM quality unchanged; the
+// aligned metrics are identical either way. NB the lap-completion boxes in
+// check_lap_completion() are in this same map frame, so the anchor shifts where they
+// trigger by ~lr -- fine for trackdrive, but keep the anchor at 0 for SKIDPAD (it loads
+// a fixed-frame bundled map and localizes against it).
 // =============================================================================
 #include "graph_slam/graph_slam.hpp"
 
@@ -55,6 +66,10 @@ GraphSLAM::GraphSLAM()
     optimizer_.addPostIterationAction(terminate_action_);
 
     
+    // Anchor the graph at the origin by default. set_initial_pose() (called once at startup by the
+    // node / offline harness, before any data) re-seats BOTH this fixed vertex and current_pose_ to
+    // the configured map-frame anchor -- 0/0/0 for the real car, (-lr,0,0) in sim to align the map
+    // frame to PacSim's world/CoG frame. See the frame policy at the top of this file.
     VertexSE2* initial_pose = new VertexSE2();
     initial_pose->setId(pose_id_counter_);
     initial_pose->setFixed(true); // Fix the initial pose to anchor the graph
@@ -127,9 +142,8 @@ void GraphSLAM::build_map_kdtree()
 
 void GraphSLAM::localize_in_map(std::vector<graph_slam_types::Cone>& observations, Eigen::Vector3d robot_pose)
 {
-    // NOTE: observations already arrive in the REAR-AXLE BASE frame -- process_observations()
-    // applies the camera extrinsic at intake. Do NOT re-apply it here. The range gate below
-    // (obs_dist > 10) is therefore in base range, ~camera_extrinsic_x_ longer than camera range.
+    // NOTE: observations already arrive in the REAR-AXLE BASE frame (the bridge's
+    // sensor_to_base transform, not graph_slam -- see the frame policy at top of file).
     if (!map_kdtree_ready_) {
         RCLCPP_WARN(
             rclcpp::get_logger("graph_slam_solver"),
@@ -348,7 +362,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
             cone.x = cone_msg.position.x;
             cone.y = cone_msg.position.y;
             cone.type = cone_msg.class_type.data;
-            not_added_observations.push_back(camera_to_base(cone));  // base frame for viz consistency
+            not_added_observations.push_back(cone);  // already in base frame (bridge intake)
         }
         return this->get_map(not_added_observations); // Skip processing if the robot is not moving
     }
@@ -399,15 +413,14 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
     std::vector<graph_slam_types::Cone> observations;
     if (v_pose){
 
-        //get observation cones -- transform camera frame -> rear-axle base frame at intake
-        //(camera extrinsic), so all downstream geometry (association, edges, localization, the
-        //pose+R(theta)*obs global step) operates in the base frame. See the frame policy at top.
+        //get observation cones -- already in the rear-axle base frame (bridge intake transform,
+        //see the frame policy at top of file); no extrinsic applied here.
         for (const auto& cone_msg : msg->cones) {
             graph_slam_types::Cone cone;
             cone.x = cone_msg.position.x;
             cone.y = cone_msg.position.y;
             cone.type = cone_msg.class_type.data;
-            observations.push_back(camera_to_base(cone));
+            observations.push_back(cone);
         }
 
         // Use localization mode
@@ -586,26 +599,28 @@ void GraphSLAM::set_anchor_mode(int mode)
                 "Observation anchor mode: %d (%s)", mode, name);
 }
 
-void GraphSLAM::set_camera_extrinsic(double x_m, double y_m, double yaw_rad)
+void GraphSLAM::set_initial_pose(double x_m, double y_m, double yaw_rad)
 {
-    this->camera_extrinsic_x_ = x_m;
-    this->camera_extrinsic_y_ = y_m;
-    this->camera_extrinsic_yaw_ = yaw_rad;
+    this->initial_pose_x_   = x_m;
+    this->initial_pose_y_   = y_m;
+    this->initial_pose_yaw_ = yaw_rad;
+    // Re-seat BOTH the graph's fixed anchor vertex (created at 0/0/0 in the ctor) and the live DR
+    // pose so they agree -- the first odom edge measures relative motion only, so a mismatch here
+    // would contradict the very first constraint. Called once at startup before any data/vertices,
+    // so no lock is needed and no downstream vertices exist yet. See the frame policy at top of file.
+    auto* anchor = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
+    if (anchor) {
+        anchor->setEstimate(SE2(x_m, y_m, yaw_rad));
+    } else {
+        RCLCPP_WARN(rclcpp::get_logger("graph_slam_solver"),
+                    "set_initial_pose: anchor vertex %ld not found; DR seed set but graph anchor "
+                    "unchanged (call before any data is processed).", pose_id_counter_);
+    }
+    this->current_pose_ = Eigen::Vector3d(x_m, y_m, yaw_rad);
     RCLCPP_INFO(rclcpp::get_logger("graph_slam_solver"),
-                "Camera extrinsic (camera->rear-axle base): x=%.4f m y=%.4f m yaw=%.4f rad "
-                "(0/0/0 = observations already in base frame)", x_m, y_m, yaw_rad);
-}
-
-// Transform one observation from the CAMERA frame into the rear-axle BASE frame:
-// obs_base = R(yaw)*obs + [x, y]. Applied at cone intake before any pose+R(theta)*obs step.
-graph_slam_types::Cone GraphSLAM::camera_to_base(const graph_slam_types::Cone& obs) const
-{
-    const double c = std::cos(camera_extrinsic_yaw_);
-    const double s = std::sin(camera_extrinsic_yaw_);
-    graph_slam_types::Cone out = obs;  // carry type/id/etc.
-    out.x = c * obs.x - s * obs.y + camera_extrinsic_x_;
-    out.y = s * obs.x + c * obs.y + camera_extrinsic_y_;
-    return out;
+                "Initial SLAM pose (map-frame anchor): x=%.4f m y=%.4f m yaw=%.4f rad "
+                "(0/0/0 = start at origin; sim uses -lr to align the map frame to the world/CoG frame)",
+                x_m, y_m, yaw_rad);
 }
 
 // Step 3 (Fix D interim): nearest pose-history entry to time t (clamped to the buffer ends).

@@ -13,12 +13,17 @@ The estimator integrates and **publishes the rear-axle pose**. The dead-reckonin
 pure unicycle in `compute_predicted_pose()` is a correct rear-axle estimator (yaw rate `omega` is
 position-independent). **Pure pursuit consumes the rear-axle pose directly.**
 
-Cone observations arrive in the **camera** frame and are transformed to the rear-axle base frame at
-intake via the `camera_extrinsic.{x,y,yaw}` params (`obs_base = R(yaw)*obs + [x,y]`), before the
-`pose + R(theta)*obs` global step. In PacSim the front sensor sits at the CoG (`perception.yaml`
-pose `[0,0,0]`), so the sim extrinsic `x == lr` (0.6975 m); the real car's camera is ~0.69 m forward
-of the rear axle. This offset is physically **distinct** from the CoG-to-rear distance `lr` used by
-the eval harness's `--gt-ref` transform even though the two are nearly equal — keep them apart.
+Cone observations on `/mapping/cones` must arrive **already in the rear-axle base frame** —
+`graph_slam` applies no sensor/camera extrinsic itself. That transform is an upstream intake
+concern owned by whichever bridge publishes `/mapping/cones`: `ZED_Bridge` on the real car, and
+`lart_to_pacsim_bridge`'s `sensor_to_base.{x,y,yaw}` params in sim. Applying it in `graph_slam` too
+would double-apply it on the real car (an earlier revision tried this — `camera_extrinsic_{x,y,yaw}_`
+— and was reverted once the bridge-side contract was confirmed; see
+`claude_code_pacsim_bridge_extrinsic_prompt.md`). In PacSim the front sensor sits at the CoG
+(`perception.yaml` pose `[0,0,0]`), so the sim bridge's offset numerically equals the CoG-to-rear
+distance `lr` (0.6975 m) — physically **distinct** from the eval harness's `--gt-ref` transform
+(which uses the same `lr` for a different purpose: reconciling GT's CoG reference against a
+rear-axle pose) even though the two values coincide — keep them apart.
 
 Ground-truth reference-point conventions (PacSim reports GT at the **CoG**) are an **eval** concern
 handled in the harness (`run_eval --gt-ref rear|cog`), never in the estimator. A CoG pose, if ever

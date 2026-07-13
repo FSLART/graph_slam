@@ -38,11 +38,15 @@ int main(int argc, char ** argv)
   if (argc < 3) {
     std::cerr << "usage: graph_slam_offline <bag_dir> <out_csv> "
                  "[sigma_v_frac sigma_theta_coeff slip_inflation final_opt_iters obs_latency "
-                 "anchor_mode cam_ex_x cam_ex_y cam_ex_yaw]\n"
+                 "anchor_mode origin_x origin_y origin_yaw]\n"
                  "(final_opt_iters=1 restores the pre-Fix-F.1 single-iteration final solve;\n"
                  " anchor_mode: 0=NEWEST[pre-Step3] 1=CONST[obs_latency] 2=STAMP[per-frame,default];\n"
-                 " cam_ex_*: camera->rear-axle base extrinsic; SIM front sensor is at the CoG so\n"
-                 "           cam_ex_x=0.6975 (default here); 0/0/0 = obs already in base frame)\n";
+                 " origin_*: map-frame anchor; SIM default -0.6975/0/0 aligns the map frame to\n"
+                 "           PacSim's world/CoG frame (RAW metrics then meaningful); 0/0/0 anchors\n"
+                 "           at the origin (the old map==start-frame behavior);\n"
+                 " NOTE: no camera/sensor extrinsic arg -- /mapping/cones in the bag must already be\n"
+                 " in the rear-axle base frame, applied upstream by the bridge that recorded it.\n"
+                 " See claude_code_pacsim_bridge_extrinsic_prompt.md / graph_slam.cpp frame policy.)\n";
     return 1;
   }
   rclcpp::init(argc, argv);  // for logging only; no node/executor is created
@@ -55,11 +59,12 @@ int main(int argc, char ** argv)
   const int final_opt_iters      = (argc > 6) ? std::stoi(argv[6]) : 50;
   const double obs_latency       = (argc > 7) ? std::stod(argv[7]) : 0.09;
   const int anchor_mode          = (argc > 8) ? std::stoi(argv[8]) : 2;  // 0=NEWEST 1=CONST 2=STAMP
-  // SIM default: front perception sensor sits at the CoG (perception.yaml pose [0,0,0]), so the
-  // camera->rear-axle extrinsic x equals lr = 0.6975 m. y/yaw = 0. 0/0/0 disables the transform.
-  const double cam_ex_x          = (argc > 9)  ? std::stod(argv[9])  : 0.6975;
-  const double cam_ex_y          = (argc > 10) ? std::stod(argv[10]) : 0.0;
-  const double cam_ex_yaw        = (argc > 11) ? std::stod(argv[11]) : 0.0;
+  // SIM default: PacSim spawns the CoG at the world origin, so the rear-axle base frame starts at
+  // -lr. Seeding the anchor here aligns the SLAM map frame to the world frame -> RAW eval metrics
+  // become directly meaningful (0/0/0 reproduces the old origin-anchored behavior for A/B).
+  const double origin_x          = (argc > 9)  ? std::stod(argv[9])  : -0.6975;
+  const double origin_y          = (argc > 10) ? std::stod(argv[10]) : 0.0;
+  const double origin_yaw        = (argc > 11) ? std::stod(argv[11]) : 0.0;
 
   // ---- read the whole bag into typed, per-topic buffers ----
   rosbag2_storage::StorageOptions storage_options;
@@ -173,7 +178,7 @@ int main(int argc, char ** argv)
   slam.set_final_optimize_max_iters(final_opt_iters);
   slam.set_obs_latency(obs_latency);
   slam.set_anchor_mode(anchor_mode);
-  slam.set_camera_extrinsic(cam_ex_x, cam_ex_y, cam_ex_yaw);
+  slam.set_initial_pose(origin_x, origin_y, origin_yaw);
   if (mission) slam.set_mission(mission);
 
   std::ofstream csv(out_csv);
