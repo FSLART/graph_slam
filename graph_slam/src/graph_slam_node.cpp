@@ -3,25 +3,28 @@
 using std::placeholders::_1;
 using namespace std;
 
-GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
-    RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been started.");
+GraphSLAM_Node::GraphSLAM_Node() : ParentNode("graph_slam_node"){
+    RCLCPP_INFO(this->get_logger(), "GraphSLAM node has been created.");
 
     #ifdef __LART_T24__
         RCLCPP_WARN(this->get_logger(), "Running on T24 hardware.");
     #else
         RCLCPP_WARN(this->get_logger(), "Running on T26 hardware");
     #endif
+}
 
+// Unconfigured -> Inactive: allocate the solver and create pub/sub/tf resources.
+GraphSLAM_Node::CallbackReturn GraphSLAM_Node::configure_impl(){
     graph_slam_solver_ = new GraphSLAM();
 
-    auto observations_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-    auto other_callbacks_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    observations_cb_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    other_cb_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
     rclcpp::SubscriptionOptions obs_options;
-    obs_options.callback_group = observations_callback_group;
+    obs_options.callback_group = observations_cb_group_;
 
     rclcpp::SubscriptionOptions other_options;
-    other_options.callback_group = other_callbacks_group;
+    other_options.callback_group = other_cb_group_;
 
     // Subscribe to the cone observations topic
     observations_subscriber_ = this->create_subscription<lart_msgs::msg::ConeArray>(
@@ -33,7 +36,7 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
         TOPIC_CONTROL_FEEDBACK, 10,
         bind(&GraphSLAM_Node::dynamics_callback, this, _1), other_options);
 
-    //Subscribe to angular velocity topic 
+    //Subscribe to angular velocity topic
     imu_subscriber_ = this->create_subscription<geometry_msgs::msg::Vector3Stamped>(
         TOPIC_IMU_ANGULAR_VELOCITY, 10,
         bind(&GraphSLAM_Node::imu_callback, this, _1), other_options);
@@ -43,7 +46,7 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
         bind(&GraphSLAM_Node::mission_callback, this, _1), other_options);
 
     slam_stats_publisher_ = this->create_publisher<lart_msgs::msg::SlamStats>(TOPIC_STATS, 10);
-    
+
     map_markers_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(TOPIC_MAP_MARKERS, 10);
 
     map_publisher_ = this->create_publisher<lart_msgs::msg::ConeArray>(TOPIC_MAP, 10);
@@ -52,14 +55,57 @@ GraphSLAM_Node::GraphSLAM_Node() : Node("graph_slam_node"){
 
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
-    std::thread broadcast_transform_thread ([this]() {
-        rclcpp::Rate rate(40);
-        while (rclcpp::ok()) {
-            this->broadcast_transform();
-            rate.sleep();
-        }
-    });
-    broadcast_transform_thread.detach();
+    RCLCPP_INFO(this->get_logger(), "GraphSLAM configured.");
+    return CallbackReturn::SUCCESS;
+}
+
+// Inactive -> Active: start the 40 Hz pose/tf broadcast. The base class
+// (ParentNode) has already activated the lifecycle publishers by this point.
+GraphSLAM_Node::CallbackReturn GraphSLAM_Node::activate_impl(){
+    broadcast_timer_ = this->create_wall_timer(
+        std::chrono::milliseconds(25),
+        std::bind(&GraphSLAM_Node::broadcast_transform, this),
+        other_cb_group_);
+
+    RCLCPP_INFO(this->get_logger(), "GraphSLAM active — broadcasting pose/tf at 40 Hz.");
+    return CallbackReturn::SUCCESS;
+}
+
+// Active -> Inactive: stop the periodic broadcast.
+GraphSLAM_Node::CallbackReturn GraphSLAM_Node::deactivate_impl(){
+    if (broadcast_timer_) {
+        broadcast_timer_->cancel();
+        broadcast_timer_.reset();
+    }
+    RCLCPP_INFO(this->get_logger(), "GraphSLAM deactivated.");
+    return CallbackReturn::SUCCESS;
+}
+
+// Inactive -> Unconfigured: release every resource created in configure_impl().
+GraphSLAM_Node::CallbackReturn GraphSLAM_Node::cleanup_impl(){
+    if (broadcast_timer_) {
+        broadcast_timer_->cancel();
+        broadcast_timer_.reset();
+    }
+    observations_subscriber_.reset();
+    dynamics_subscriber_.reset();
+    imu_subscriber_.reset();
+    mission_subscriber_.reset();
+    slam_stats_publisher_.reset();
+    map_markers_publisher_.reset();
+    map_publisher_.reset();
+    pose_publisher_.reset();
+    tf_broadcaster_.reset();
+
+    delete graph_slam_solver_;
+    graph_slam_solver_ = nullptr;
+
+    RCLCPP_INFO(this->get_logger(), "GraphSLAM cleaned up.");
+    return CallbackReturn::SUCCESS;
+}
+
+GraphSLAM_Node::CallbackReturn GraphSLAM_Node::shutdown_impl(){
+    return cleanup_impl();
 }
 
 void GraphSLAM_Node::broadcast_transform(){
@@ -156,7 +202,8 @@ int main(int argc, char *argv[])
     auto node = std::make_shared<GraphSLAM_Node>();
 
     rclcpp::executors::MultiThreadedExecutor executor;
-    executor.add_node(node);
+    // Lifecycle nodes are added to an executor via their base node interface.
+    executor.add_node(node->get_node_base_interface());
     executor.spin();
 
     rclcpp::shutdown();

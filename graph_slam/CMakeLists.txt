@@ -8,6 +8,8 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(super_node REQUIRED)
 find_package(lart_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(g2o REQUIRED)
@@ -42,6 +44,8 @@ include_directories(
 
 ament_target_dependencies(graph_slam_node
   rclcpp
+  rclcpp_lifecycle
+  super_node
   lart_msgs
   geometry_msgs
   tf2
