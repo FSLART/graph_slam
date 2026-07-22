@@ -9,8 +9,8 @@ GraphSLAM::GraphSLAM()
     this->current_mission_.data = lart_msgs::msg::Mission::MANUAL;
 
     // FOR TESTING PURPOSES ONLY
-    this->current_mission_.data = 6;
-    this->mission_set_ = true;
+    // this->current_mission_.data = 6;
+    // this->mission_set_ = true;
 
     association_solver_ = new AssociationSolver(ASSOCIATION_MODE);
 
