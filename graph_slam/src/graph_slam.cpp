@@ -33,7 +33,7 @@ GraphSLAM::GraphSLAM()
     initial_pose->setId(pose_id_counter_);
     initial_pose->setFixed(true); // Fix the initial pose to anchor the graph
     initial_pose->setEstimate(SE2(0, 0, 0));
-    this->current_pose_ = Eigen::Vector3d(0, 0, 0);
+    this->current_pose_ = Eigen::Vector3d(-DISTANCE_TO_CG, 0, 0);
     
     optimizer_.addVertex(initial_pose);
     

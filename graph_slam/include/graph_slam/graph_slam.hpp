@@ -46,6 +46,9 @@
 
 #define IMU_NOISE 0.01
 
+// TESTING IN SIMULATION
+#define DISTANCE_TO_CG 0.72
+
 struct LandmarkKDInfo {
     long vertex_id;
     int color;
