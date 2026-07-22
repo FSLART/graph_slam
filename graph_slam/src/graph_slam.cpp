@@ -327,7 +327,7 @@ visualization_msgs::msg::MarkerArray GraphSLAM::process_observations(const lart_
 
         // Use localization mode
         if (localization_mode_) {
-            localize_in_map(observations, robot_pose_);
+            //localize_in_map(observations, robot_pose_);
             check_lap_completion();
             return final_map_;
         }
@@ -693,18 +693,18 @@ void GraphSLAM::update_graph()
 
 
     // Get optimized pose and correct the current pose
-    auto* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
-    if (current_pose_vertex) {
-        SE2 optimized_pose = current_pose_vertex->estimate();
+    // auto* current_pose_vertex = dynamic_cast<VertexSE2*>(optimizer_.vertex(pose_id_counter_));
+    // if (current_pose_vertex) {
+    //     SE2 optimized_pose = current_pose_vertex->estimate();
 
-        Eigen::Vector3d corrected_pose;
-        corrected_pose[0] = optimized_pose.translation()[0];
-        corrected_pose[1] = optimized_pose.translation()[1];
-        corrected_pose[2] = optimized_pose.rotation().angle();
+    //     Eigen::Vector3d corrected_pose;
+    //     corrected_pose[0] = optimized_pose.translation()[0];
+    //     corrected_pose[1] = optimized_pose.translation()[1];
+    //     corrected_pose[2] = optimized_pose.rotation().angle();
 
-        std::lock_guard<std::mutex> pose_lock(pose_mutex_);
-        current_pose_ = corrected_pose;
-    }
+    //     std::lock_guard<std::mutex> pose_lock(pose_mutex_);
+    //     current_pose_ = corrected_pose;
+    // }
 
     // Unfix anchor after solve unless it's the very first pose
     if (anchor && anchor->id() != 0) anchor->setFixed(false);
